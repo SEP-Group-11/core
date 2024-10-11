@@ -78,6 +78,8 @@ ICON_COMPASS_OUTLINE = "mdi:compass-outline"
 ICON_WEATHER_POURING = "mdi:weather-pouring"
 ICON_PARTLY_CLOUDY = "mdi:weather-partly-cloudy"
 
+NO_FORECAST_WARNING = "No forecast for fcday=%s"
+
 
 SENSOR_TYPES: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -798,7 +800,7 @@ class BrSensor(SensorEntity):
                 try:
                     condition = data.get(FORECAST)[fcday].get(CONDITION)
                 except IndexError:
-                    _LOGGER.warning("No forecast for fcday=%s", fcday)
+                    _LOGGER.warning(NO_FORECAST_WARNING, fcday)
                     return False
 
                 if condition:
@@ -827,7 +829,7 @@ class BrSensor(SensorEntity):
                         sensor_type[:-3]
                     )
                 except IndexError:
-                    _LOGGER.warning("No forecast for fcday=%s", fcday)
+                    _LOGGER.warning(NO_FORECAST_WARNING, fcday)
                     return False
 
                 if self.state is not None:
@@ -840,7 +842,7 @@ class BrSensor(SensorEntity):
                     sensor_type[:-3]
                 )
             except IndexError:
-                _LOGGER.warning("No forecast for fcday=%s", fcday)
+                _LOGGER.warning(NO_FORECAST_WARNING, fcday)
                 return False
             return True
 
