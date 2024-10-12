@@ -3,7 +3,6 @@
 import asyncio
 import io
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 import wave
 
@@ -21,7 +20,7 @@ from homeassistant.components.voip.assist_satellite import Tones, VoipAssistSate
 from homeassistant.components.voip.devices import VoIPDevice, VoIPDevices
 from homeassistant.components.voip.voip import PreRecordMessageProtocol, make_protocol
 from homeassistant.const import STATE_OFF, STATE_ON, Platform
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.setup import async_setup_component
@@ -205,116 +204,110 @@ async def test_pipeline(
     # Used to test that audio queue is cleared before pipeline starts
     bad_chunk = bytes([1, 2, 3, 4])
 
-    async def async_pipeline_from_audio_stream(
-        hass: HomeAssistant,
-        context: Context,
-        *args,
-        device_id: str | None,
-        tts_audio_output: str | dict[str, Any] | None,
-        **kwargs,
-    ):
-        assert context.user_id == voip_user_id
-        assert device_id == voip_device.device_id
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            assert self.context.user_id == voip_user_id
+            assert self.device_id == voip_device.device_id
 
-        # voip can only stream WAV
-        assert tts_audio_output == {
-            tts.ATTR_PREFERRED_FORMAT: "wav",
-            tts.ATTR_PREFERRED_SAMPLE_RATE: 16000,
-            tts.ATTR_PREFERRED_SAMPLE_CHANNELS: 1,
-            tts.ATTR_PREFERRED_SAMPLE_BYTES: 2,
-        }
+            # voip can only stream WAV
+            assert self.tts_audio_output == {
+                tts.ATTR_PREFERRED_FORMAT: "wav",
+                tts.ATTR_PREFERRED_SAMPLE_RATE: 16000,
+                tts.ATTR_PREFERRED_SAMPLE_CHANNELS: 1,
+                tts.ATTR_PREFERRED_SAMPLE_BYTES: 2,
+            }
 
-        stt_stream = kwargs["stt_stream"]
-        event_callback = kwargs["event_callback"]
-        in_command = False
-        async for chunk in stt_stream:
-            # Stream will end when VAD detects end of "speech"
-            assert chunk != bad_chunk
-            if sum(chunk) > 0:
-                in_command = True
-            elif in_command:
-                break  # done with command
+            stt_stream = self.stt_stream
+            event_callback = self.event_callback
+            in_command = False
+            async for chunk in stt_stream:
+                # Stream will end when VAD detects end of "speech"
+                assert chunk != bad_chunk
+                if sum(chunk) > 0:
+                    in_command = True
+                elif in_command:
+                    break  # done with command
 
-        # Test empty data
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type="not-used",
-                data={},
+            # Test empty data
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type="not-used",
+                    data={},
+                )
             )
-        )
 
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.STT_START,
-                data={"engine": "test", "metadata": {}},
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.STT_START,
+                    data={"engine": "test", "metadata": {}},
+                )
             )
-        )
 
-        assert satellite.state == AssistSatelliteState.LISTENING_COMMAND
+            assert satellite.state == AssistSatelliteState.LISTENING_COMMAND
 
-        # Fake STT result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.STT_END,
-                data={"stt_output": {"text": "fake-text"}},
+            # Fake STT result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "fake-text"}},
+                )
             )
-        )
 
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.INTENT_START,
-                data={
-                    "engine": "test",
-                    "language": hass.config.language,
-                    "intent_input": "fake-text",
-                    "conversation_id": None,
-                    "device_id": None,
-                },
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.INTENT_START,
+                    data={
+                        "engine": "test",
+                        "language": hass.config.language,
+                        "intent_input": "fake-text",
+                        "conversation_id": None,
+                        "device_id": None,
+                    },
+                )
             )
-        )
 
-        assert satellite.state == AssistSatelliteState.PROCESSING
+            assert satellite.state == AssistSatelliteState.PROCESSING
 
-        # Fake intent result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.INTENT_END,
-                data={
-                    "intent_output": {
-                        "conversation_id": "fake-conversation",
-                    }
-                },
+            # Fake intent result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.INTENT_END,
+                    data={
+                        "intent_output": {
+                            "conversation_id": "fake-conversation",
+                        }
+                    },
+                )
             )
-        )
 
-        # Fake tts result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.TTS_START,
-                data={
-                    "engine": "test",
-                    "language": hass.config.language,
-                    "voice": "test",
-                    "tts_input": "fake-text",
-                },
+            # Fake tts result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.TTS_START,
+                    data={
+                        "engine": "test",
+                        "language": hass.config.language,
+                        "voice": "test",
+                        "tts_input": "fake-text",
+                    },
+                )
             )
-        )
 
-        assert satellite.state == AssistSatelliteState.RESPONDING
+            assert satellite.state == AssistSatelliteState.RESPONDING
 
-        # Proceed with media output
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.TTS_END,
-                data={"tts_output": {"media_id": _MEDIA_ID}},
+            # Proceed with media output
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.TTS_END,
+                    data={"tts_output": {"media_id": _MEDIA_ID}},
+                )
             )
-        )
 
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.RUN_END
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.RUN_END
+                )
             )
-        )
 
     original_tts_response_finished = satellite.tts_response_finished
 
@@ -331,8 +324,8 @@ async def test_pipeline(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.voip.assist_satellite.tts.async_get_media_source_audio",
@@ -383,15 +376,16 @@ async def test_stt_stream_timeout(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        stt_stream = kwargs["stt_stream"]
-        async for _chunk in stt_stream:
-            # Iterate over stream
-            pass
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
+            async for _chunk in stt_stream:
+                # Iterate over stream
+                pass
 
     with patch(
-        "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-        new=async_pipeline_from_audio_stream,
+        "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+        new=MockAudioStreamPipelineBuilder,
     ):
         satellite._tones = Tones(0)
         satellite._audio_chunk_timeout = 0.001
@@ -422,43 +416,44 @@ async def test_tts_timeout(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        stt_stream = kwargs["stt_stream"]
-        event_callback = kwargs["event_callback"]
-        in_command = False
-        async for chunk in stt_stream:
-            if sum(chunk) > 0:
-                in_command = True
-            elif in_command:
-                break  # done with command
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
+            event_callback = self.event_callback
+            in_command = False
+            async for chunk in stt_stream:
+                if sum(chunk) > 0:
+                    in_command = True
+                elif in_command:
+                    break  # done with command
 
-        # Fake STT result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.STT_END,
-                data={"stt_output": {"text": "fake-text"}},
+            # Fake STT result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "fake-text"}},
+                )
             )
-        )
 
-        # Fake intent result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.INTENT_END,
-                data={
-                    "intent_output": {
-                        "conversation_id": "fake-conversation",
-                    }
-                },
+            # Fake intent result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.INTENT_END,
+                    data={
+                        "intent_output": {
+                            "conversation_id": "fake-conversation",
+                        }
+                    },
+                )
             )
-        )
 
-        # Proceed with media output
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.TTS_END,
-                data={"tts_output": {"media_id": _MEDIA_ID}},
+            # Proceed with media output
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.TTS_END,
+                    data={"tts_output": {"media_id": _MEDIA_ID}},
+                )
             )
-        )
 
     tone_bytes = bytes([1, 2, 3, 4])
 
@@ -479,8 +474,8 @@ async def test_tts_timeout(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.voip.assist_satellite.tts.async_get_media_source_audio",
@@ -533,43 +528,44 @@ async def test_tts_wrong_extension(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        stt_stream = kwargs["stt_stream"]
-        event_callback = kwargs["event_callback"]
-        in_command = False
-        async for chunk in stt_stream:
-            if sum(chunk) > 0:
-                in_command = True
-            elif in_command:
-                break  # done with command
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
+            event_callback = self.event_callback
+            in_command = False
+            async for chunk in stt_stream:
+                if sum(chunk) > 0:
+                    in_command = True
+                elif in_command:
+                    break  # done with command
 
-        # Fake STT result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.STT_END,
-                data={"stt_output": {"text": "fake-text"}},
+            # Fake STT result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "fake-text"}},
+                )
             )
-        )
 
-        # Fake intent result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.INTENT_END,
-                data={
-                    "intent_output": {
-                        "conversation_id": "fake-conversation",
-                    }
-                },
+            # Fake intent result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.INTENT_END,
+                    data={
+                        "intent_output": {
+                            "conversation_id": "fake-conversation",
+                        }
+                    },
+                )
             )
-        )
 
-        # Proceed with media output
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.TTS_END,
-                data={"tts_output": {"media_id": _MEDIA_ID}},
+            # Proceed with media output
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.TTS_END,
+                    data={"tts_output": {"media_id": _MEDIA_ID}},
+                )
             )
-        )
 
     async def async_get_media_source_audio(
         hass: HomeAssistant,
@@ -580,8 +576,8 @@ async def test_tts_wrong_extension(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.voip.assist_satellite.tts.async_get_media_source_audio",
@@ -628,43 +624,44 @@ async def test_tts_wrong_wav_format(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        stt_stream = kwargs["stt_stream"]
-        event_callback = kwargs["event_callback"]
-        in_command = False
-        async for chunk in stt_stream:
-            if sum(chunk) > 0:
-                in_command = True
-            elif in_command:
-                break  # done with command
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
+            event_callback = self.event_callback
+            in_command = False
+            async for chunk in stt_stream:
+                if sum(chunk) > 0:
+                    in_command = True
+                elif in_command:
+                    break  # done with command
 
-        # Fake STT result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.STT_END,
-                data={"stt_output": {"text": "fake-text"}},
+            # Fake STT result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "fake-text"}},
+                )
             )
-        )
 
-        # Fake intent result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.INTENT_END,
-                data={
-                    "intent_output": {
-                        "conversation_id": "fake-conversation",
-                    }
-                },
+            # Fake intent result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.INTENT_END,
+                    data={
+                        "intent_output": {
+                            "conversation_id": "fake-conversation",
+                        }
+                    },
+                )
             )
-        )
 
-        # Proceed with media output
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.TTS_END,
-                data={"tts_output": {"media_id": _MEDIA_ID}},
+            # Proceed with media output
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.TTS_END,
+                    data={"tts_output": {"media_id": _MEDIA_ID}},
+                )
             )
-        )
 
     async def async_get_media_source_audio(
         hass: HomeAssistant,
@@ -682,8 +679,8 @@ async def test_tts_wrong_wav_format(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.voip.assist_satellite.tts.async_get_media_source_audio",
@@ -728,48 +725,49 @@ async def test_empty_tts_output(
     satellite = async_get_satellite_entity(hass, voip.DOMAIN, voip_device.voip_id)
     assert isinstance(satellite, VoipAssistSatellite)
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        stt_stream = kwargs["stt_stream"]
-        event_callback = kwargs["event_callback"]
-        in_command = False
-        async for chunk in stt_stream:
-            if sum(chunk) > 0:
-                in_command = True
-            elif in_command:
-                break  # done with command
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
+            event_callback = self.event_callback
+            in_command = False
+            async for chunk in stt_stream:
+                if sum(chunk) > 0:
+                    in_command = True
+                elif in_command:
+                    break  # done with command
 
-        # Fake STT result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.STT_END,
-                data={"stt_output": {"text": "fake-text"}},
+            # Fake STT result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "fake-text"}},
+                )
             )
-        )
 
-        # Fake intent result
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.INTENT_END,
-                data={
-                    "intent_output": {
-                        "conversation_id": "fake-conversation",
-                    }
-                },
+            # Fake intent result
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.INTENT_END,
+                    data={
+                        "intent_output": {
+                            "conversation_id": "fake-conversation",
+                        }
+                    },
+                )
             )
-        )
 
-        # Empty TTS output
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.TTS_END,
-                data={"tts_output": {}},
+            # Empty TTS output
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.TTS_END,
+                    data={"tts_output": {}},
+                )
             )
-        )
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.voip.assist_satellite.VoipAssistSatellite._send_tts",
@@ -808,15 +806,16 @@ async def test_pipeline_error(
     done = asyncio.Event()
     played_audio_bytes = b""
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        # Fake error
-        event_callback = kwargs["event_callback"]
-        event_callback(
-            assist_pipeline.PipelineEvent(
-                type=assist_pipeline.PipelineEventType.ERROR,
-                data={"code": "error-code", "message": "error message"},
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            # Fake error
+            event_callback = self.event_callback
+            event_callback(
+                assist_pipeline.PipelineEvent(
+                    type=assist_pipeline.PipelineEventType.ERROR,
+                    data={"code": "error-code", "message": "error message"},
+                )
             )
-        )
 
     async def async_send_audio(audio_bytes: bytes, **kwargs):
         nonlocal played_audio_bytes
@@ -827,8 +826,8 @@ async def test_pipeline_error(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
     ):
         satellite._tones = Tones.ERROR

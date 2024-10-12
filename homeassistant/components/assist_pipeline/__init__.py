@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterable
-from typing import Any
+from typing import Any, cast
 
 import voluptuous as vol
 
@@ -50,7 +50,7 @@ __all__ = (
     "async_get_pipelines",
     "async_migrate_engine",
     "async_setup",
-    "async_pipeline_from_audio_stream",
+    "AudioStreamPipelineBuilder",
     "async_update_pipeline",
     "AudioSettings",
     "Pipeline",
@@ -92,44 +92,53 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def async_pipeline_from_audio_stream(
-    hass: HomeAssistant,
-    *,
-    context: Context,
-    event_callback: PipelineEventCallback,
-    stt_metadata: stt.SpeechMetadata,
-    stt_stream: AsyncIterable[bytes],
-    wake_word_phrase: str | None = None,
-    pipeline_id: str | None = None,
-    conversation_id: str | None = None,
-    tts_audio_output: str | dict[str, Any] | None = None,
-    wake_word_settings: WakeWordSettings | None = None,
-    audio_settings: AudioSettings | None = None,
-    device_id: str | None = None,
-    start_stage: PipelineStage = PipelineStage.STT,
-    end_stage: PipelineStage = PipelineStage.TTS,
-) -> None:
-    """Create an audio pipeline from an audio stream.
+class AudioStreamPipelineBuilder:
+    """Builds an audio stream pipeline for Home Assistant."""
 
-    Raises PipelineNotFound if no pipeline is found.
-    """
-    pipeline_input = PipelineInput(
-        conversation_id=conversation_id,
-        device_id=device_id,
-        stt_metadata=stt_metadata,
-        stt_stream=stt_stream,
-        wake_word_phrase=wake_word_phrase,
-        run=PipelineRun(
-            hass,
-            context=context,
-            pipeline=async_get_pipeline(hass, pipeline_id=pipeline_id),
-            start_stage=start_stage,
-            end_stage=end_stage,
-            event_callback=event_callback,
-            tts_audio_output=tts_audio_output,
-            wake_word_settings=wake_word_settings,
-            audio_settings=audio_settings or AudioSettings(),
-        ),
-    )
-    await pipeline_input.validate()
-    await pipeline_input.execute()
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the AssistPipeline with HomeAssistant instance. Sets all parameters to None by default."""
+        self.hass = hass
+        self.context: Context | None = None
+        self.event_callback: PipelineEventCallback | None = None
+        self.stt_metadata: stt.SpeechMetadata | None = None
+        self.stt_stream: AsyncIterable[bytes] | None = None
+        self.wake_word_phrase: str | None = None
+        self.pipeline_id: str | None = None
+        self.conversation_id: str | None = None
+        self.tts_audio_output: str | dict[str, Any] | None = None
+        self.wake_word_settings: WakeWordSettings | None = None
+        self.audio_settings: AudioSettings | None = None
+        self.device_id: str | None = None
+        self.start_stage: PipelineStage = PipelineStage.STT
+        self.end_stage: PipelineStage = PipelineStage.TTS
+
+    async def build(self) -> None:
+        """Create an audio pipeline from an audio stream.
+
+        Raises PipelineNotFound if no pipeline is found.
+        """
+        if not all(
+            [self.context, self.event_callback, self.stt_metadata, self.stt_stream]
+        ):
+            raise ValueError("Missing required parameters")
+        run = PipelineRun(
+            self.hass,
+            context=cast(Context, self.context),
+            pipeline=async_get_pipeline(self.hass, pipeline_id=self.pipeline_id),
+            start_stage=self.start_stage,
+            end_stage=self.end_stage,
+            event_callback=cast(PipelineEventCallback, self.event_callback),
+            tts_audio_output=self.tts_audio_output,
+            wake_word_settings=self.wake_word_settings,
+            audio_settings=self.audio_settings or AudioSettings(),
+        )
+        pipeline_input = PipelineInput(
+            conversation_id=self.conversation_id,
+            device_id=self.device_id,
+            stt_metadata=cast(stt.SpeechMetadata, self.stt_metadata),
+            stt_stream=cast(AsyncIterable[bytes], self.stt_stream),
+            wake_word_phrase=self.wake_word_phrase,
+            run=run,
+        )
+        await pipeline_input.validate()
+        await pipeline_input.execute()

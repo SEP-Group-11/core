@@ -387,37 +387,34 @@ class WyomingSatellite:
 
         self._is_pipeline_running = True
         self._pipeline_ended_event.clear()
+        pipeline_builder = assist_pipeline.AudioStreamPipelineBuilder(self.hass)
+        pipeline_builder.context = Context()
+        pipeline_builder.event_callback = self._event_callback
+        pipeline_builder.stt_metadata = stt.SpeechMetadata(
+            language=pipeline.language,
+            format=stt.AudioFormats.WAV,
+            codec=stt.AudioCodecs.PCM,
+            bit_rate=stt.AudioBitRates.BITRATE_16,
+            sample_rate=stt.AudioSampleRates.SAMPLERATE_16000,
+            channel=stt.AudioChannels.CHANNEL_MONO,
+        )
+        pipeline_builder.stt_stream = stt_stream
+        pipeline_builder.start_stage = start_stage
+        pipeline_builder.end_stage = end_stage
+        pipeline_builder.tts_audio_output = "wav"
+        pipeline_builder.pipeline_id = pipeline_id
+        pipeline_builder.audio_settings = assist_pipeline.AudioSettings(
+            noise_suppression_level=self.device.noise_suppression_level,
+            auto_gain_dbfs=self.device.auto_gain,
+            volume_multiplier=self.device.volume_multiplier,
+            silence_seconds=VadSensitivity.to_seconds(self.device.vad_sensitivity),
+        )
+        pipeline_builder.device_id = self.device.device_id
+        pipeline_builder.wake_word_phrase = wake_word_phrase
+        pipeline_builder.conversation_id = self._conversation_id
         self.config_entry.async_create_background_task(
             self.hass,
-            assist_pipeline.async_pipeline_from_audio_stream(
-                self.hass,
-                context=Context(),
-                event_callback=self._event_callback,
-                stt_metadata=stt.SpeechMetadata(
-                    language=pipeline.language,
-                    format=stt.AudioFormats.WAV,
-                    codec=stt.AudioCodecs.PCM,
-                    bit_rate=stt.AudioBitRates.BITRATE_16,
-                    sample_rate=stt.AudioSampleRates.SAMPLERATE_16000,
-                    channel=stt.AudioChannels.CHANNEL_MONO,
-                ),
-                stt_stream=stt_stream,
-                start_stage=start_stage,
-                end_stage=end_stage,
-                tts_audio_output="wav",
-                pipeline_id=pipeline_id,
-                audio_settings=assist_pipeline.AudioSettings(
-                    noise_suppression_level=self.device.noise_suppression_level,
-                    auto_gain_dbfs=self.device.auto_gain,
-                    volume_multiplier=self.device.volume_multiplier,
-                    silence_seconds=VadSensitivity.to_seconds(
-                        self.device.vad_sensitivity
-                    ),
-                ),
-                device_id=self.device.device_id,
-                wake_word_phrase=wake_word_phrase,
-                conversation_id=self._conversation_id,
-            ),
+            pipeline_builder.build(),
             name="wyoming satellite pipeline",
         )
 
