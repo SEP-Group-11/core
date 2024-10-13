@@ -459,14 +459,8 @@ class AuthManager:
         credential: models.Credentials | None = None,
     ) -> models.RefreshToken:
         """Create a new refresh token for a user."""
-        if not user.is_active:
-            raise ValueError("User is not active")
 
-        if user.system_generated and client_id is not None:
-            raise ValueError(
-                "System generated users cannot have refresh tokens connected "
-                "to a client."
-            )
+        self._validate_user_status(user, client_id)
 
         if token_type is None:
             if user.system_generated:
@@ -513,6 +507,16 @@ class AuthManager:
             expire_at,
             credential,
         )
+
+    def _validate_user_status(self, user: models.User, client_id: str | None) -> None:
+        if not user.is_active:
+            raise ValueError("User is not active")
+
+        if user.system_generated and client_id is not None:
+            raise ValueError(
+                "System generated users cannot have refresh tokens connected "
+                "to a client."
+            )
 
     @callback
     def async_get_refresh_token(self, token_id: str) -> models.RefreshToken | None:
