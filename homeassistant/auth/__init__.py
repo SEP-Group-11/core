@@ -459,20 +459,10 @@ class AuthManager:
         credential: models.Credentials | None = None,
     ) -> models.RefreshToken:
         """Create a new refresh token for a user."""
-        if not user.is_active:
-            raise ValueError("User is not active")
 
-        if user.system_generated and client_id is not None:
-            raise ValueError(
-                "System generated users cannot have refresh tokens connected "
-                "to a client."
-            )
+        self._validate_user_status(user, client_id)
 
-        if token_type is None:
-            if user.system_generated:
-                token_type = models.TOKEN_TYPE_SYSTEM
-            else:
-                token_type = models.TOKEN_TYPE_NORMAL
+        token_type = self._get_token_type(user, token_type)
 
         if token_type is models.TOKEN_TYPE_NORMAL:
             expire_at = time.time() + REFRESH_TOKEN_EXPIRATION
@@ -512,6 +502,26 @@ class AuthManager:
             access_token_expiration,
             expire_at,
             credential,
+        )
+
+    def _validate_user_status(self, user: models.User, client_id: str | None) -> None:
+        if not user.is_active:
+            raise ValueError("User is not active")
+
+        if user.system_generated and client_id is not None:
+            raise ValueError(
+                "System generated users cannot have refresh tokens connected "
+                "to a client."
+            )
+
+    def _get_token_type(self, user: models.User, token_type: str | None) -> str:
+        """Determine the token type if it's not provided."""
+        if token_type is not None:
+            return token_type
+        return (
+            models.TOKEN_TYPE_SYSTEM
+            if user.system_generated
+            else models.TOKEN_TYPE_NORMAL
         )
 
     @callback
