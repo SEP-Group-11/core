@@ -1425,7 +1425,22 @@ class AlexaModeController(AlexaCapability):
         """Read and return a property."""
         if name != "mode":
             raise UnsupportedProperty(name)
+        if self.instance:
+            domain = self.instance.split(".")[0]
+        else:
+            return None
+        mode_handlers = {
+            fan.DOMAIN: self._handle_fan_mode,
+            humidifier.DOMAIN: self._handle_humidifier_mode,
+            remote.DOMAIN: self._handle_remote_mode,
+            water_heater.DOMAIN: self._handle_water_heater_mode,
+            cover.DOMAIN: self._handle_cover_mode,
+            valve.DOMAIN: self._handle_valve_mode,
+        }
+        handler = mode_handlers.get(domain)
+        return handler() if handler else None
 
+    def _handle_fan_mode(self) -> str | None:
         # Fan Direction
         if self.instance == f"{fan.DOMAIN}.{fan.ATTR_DIRECTION}":
             mode = self.entity.attributes.get(fan.ATTR_DIRECTION, None)
@@ -1437,7 +1452,9 @@ class AlexaModeController(AlexaCapability):
             mode = self.entity.attributes.get(fan.ATTR_PRESET_MODE, None)
             if mode in self.entity.attributes.get(fan.ATTR_PRESET_MODES, None):
                 return f"{fan.ATTR_PRESET_MODE}.{mode}"
+        return None
 
+    def _handle_humidifier_mode(self) -> str | None:
         # Humidifier mode
         if self.instance == f"{humidifier.DOMAIN}.{humidifier.ATTR_MODE}":
             mode = self.entity.attributes.get(humidifier.ATTR_MODE)
@@ -1446,13 +1463,17 @@ class AlexaModeController(AlexaCapability):
             )
             if mode in modes:
                 return f"{humidifier.ATTR_MODE}.{mode}"
+        return None
 
+    def _handle_remote_mode(self) -> str | None:
         # Remote Activity
         if self.instance == f"{remote.DOMAIN}.{remote.ATTR_ACTIVITY}":
             activity = self.entity.attributes.get(remote.ATTR_CURRENT_ACTIVITY, None)
             if activity in self.entity.attributes.get(remote.ATTR_ACTIVITY_LIST, []):
                 return f"{remote.ATTR_ACTIVITY}.{activity}"
+        return None
 
+    def _handle_water_heater_mode(self) -> str | None:
         # Water heater operation mode
         if self.instance == f"{water_heater.DOMAIN}.{water_heater.ATTR_OPERATION_MODE}":
             operation_mode = self.entity.attributes.get(
@@ -1463,7 +1484,9 @@ class AlexaModeController(AlexaCapability):
             )
             if operation_mode in operation_modes:
                 return f"{water_heater.ATTR_OPERATION_MODE}.{operation_mode}"
+        return None
 
+    def _handle_cover_mode(self) -> str | None:
         # Cover Position
         if self.instance == f"{cover.DOMAIN}.{cover.ATTR_POSITION}":
             # Return state instead of position when using ModeController.
@@ -1476,7 +1499,9 @@ class AlexaModeController(AlexaCapability):
                 STATE_UNKNOWN,
             ):
                 return f"{cover.ATTR_POSITION}.{mode}"
+        return None
 
+    def _handle_valve_mode(self) -> str | None:
         # Valve position state
         if self.instance == f"{valve.DOMAIN}.state":
             # Return state instead of position when using ModeController.
@@ -1489,7 +1514,6 @@ class AlexaModeController(AlexaCapability):
                 STATE_UNKNOWN,
             ):
                 return f"state.{state}"
-
         return None
 
     def configuration(self) -> dict[str, Any] | None:
