@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import hmac
 import itertools
 from logging import getLogger
@@ -389,7 +389,7 @@ class AuthStore:
         self._async_schedule_save(INITIAL_LOAD_SAVE_DELAY)
 
     def _process_groups(
-        self, data: dict, groups: dict
+        self, data: dict[str, list[dict[str, Any]]], groups: dict[str, models.Group]
     ) -> tuple[bool, bool, bool, str | None]:
         # Soft-migrating data as we load. We are going to make sure we have a
         # read only group and an admin group. There are two states that we can
@@ -456,12 +456,12 @@ class AuthStore:
 
     def _process_users(
         self,
-        data: dict,
+        data: dict[str, list[dict[str, Any]]],
         group_without_policy: str | None,
-        groups: dict,
+        groups: dict[str, models.Group],
         migrate_users_to_admin_group: bool,
-        users: dict,
-        perm_lookup,
+        users: dict[str, models.User],
+        perm_lookup: PermissionLookup,
     ) -> None:
         for user_dict in data["users"]:
             # Collect the users group.
@@ -490,9 +490,9 @@ class AuthStore:
 
     def _process_refresh_tokens(
         self,
-        data: dict,
-        users: dict,
-        credentials: dict,
+        data: dict[str, list[dict[str, Any]]],
+        users: dict[str, models.User],
+        credentials: dict[str, models.Credentials],
     ) -> None:
         for rt_dict in data["refresh_tokens"]:
             # Filter out the old keys that don't have jwt_key (pre-0.76)
@@ -531,12 +531,12 @@ class AuthStore:
 
     def _create_refresh_token(
         self,
-        rt_dict: dict,
-        users: dict,
+        rt_dict: dict[str, Any],
+        users: dict[str, models.User],
         token_type: str,
-        created_at,
-        last_used_at,
-        credentials: dict,
+        created_at: datetime,
+        last_used_at: datetime | None,
+        credentials: dict[str, models.Credentials],
     ) -> models.RefreshToken:
         token = models.RefreshToken(
             id=rt_dict["id"],
