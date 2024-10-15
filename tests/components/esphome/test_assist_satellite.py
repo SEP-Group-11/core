@@ -24,7 +24,7 @@ from aioesphomeapi import (
 )
 import pytest
 
-from homeassistant.components import assist_satellite, tts
+from homeassistant.components import assist_pipeline, assist_satellite, tts
 from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
 from homeassistant.components.assist_satellite import (
     AssistSatelliteConfiguration,
@@ -149,180 +149,181 @@ async def test_pipeline_api_audio(
         await stream_tts_audio_ready.wait()
         await original_stream_tts_audio(*args, **kwargs)
 
-    async def async_pipeline_from_audio_stream(*args, device_id, **kwargs):
-        assert device_id == dev.id
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            assert self.device_id == dev.id
 
-        stt_stream = kwargs["stt_stream"]
+            stt_stream = self.stt_stream
 
-        chunks = [chunk async for chunk in stt_stream]
+            chunks = [chunk async for chunk in stt_stream]
 
-        # Verify test API audio
-        assert chunks == [b"test-mic"]
+            # Verify test API audio
+            assert chunks == [b"test-mic"]
 
-        event_callback = kwargs["event_callback"]
+            event_callback = self.event_callback
 
-        # Test unknown event type
-        event_callback(
-            PipelineEvent(
-                type="unknown-event",
-                data={},
+            # Test unknown event type
+            event_callback(
+                PipelineEvent(
+                    type="unknown-event",
+                    data={},
+                )
             )
-        )
 
-        mock_client.send_voice_assistant_event.assert_not_called()
+            mock_client.send_voice_assistant_event.assert_not_called()
 
-        # Test error event
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.ERROR,
-                data={"code": "test-error-code", "message": "test-error-message"},
+            # Test error event
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.ERROR,
+                    data={"code": "test-error-code", "message": "test-error-message"},
+                )
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_ERROR,
-            {"code": "test-error-code", "message": "test-error-message"},
-        )
-
-        # Wake word
-        assert satellite.state == AssistSatelliteState.LISTENING_WAKE_WORD
-
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.WAKE_WORD_START,
-                data={
-                    "entity_id": "test-wake-word-entity-id",
-                    "metadata": {},
-                    "timeout": 0,
-                },
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_ERROR,
+                {"code": "test-error-code", "message": "test-error-message"},
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_WAKE_WORD_START,
-            {},
-        )
+            # Wake word
+            assert satellite.state == AssistSatelliteState.LISTENING_WAKE_WORD
 
-        # Test no wake word detected
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.WAKE_WORD_END, data={"wake_word_output": {}}
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.WAKE_WORD_START,
+                    data={
+                        "entity_id": "test-wake-word-entity-id",
+                        "metadata": {},
+                        "timeout": 0,
+                    },
+                )
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_ERROR,
-            {"code": "no_wake_word", "message": "No wake word detected"},
-        )
-
-        # Correct wake word detection
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.WAKE_WORD_END,
-                data={"wake_word_output": {"wake_word_phrase": "test-wake-word"}},
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_WAKE_WORD_START,
+                {},
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_WAKE_WORD_END,
-            {},
-        )
-
-        # STT
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.STT_START,
-                data={"engine": "test-stt-engine", "metadata": {}},
+            # Test no wake word detected
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.WAKE_WORD_END, data={"wake_word_output": {}}
+                )
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_STT_START,
-            {},
-        )
-        assert satellite.state == AssistSatelliteState.LISTENING_COMMAND
-
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.STT_END,
-                data={"stt_output": {"text": "test-stt-text"}},
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_ERROR,
+                {"code": "no_wake_word", "message": "No wake word detected"},
             )
-        )
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_STT_END,
-            {"text": "test-stt-text"},
-        )
 
-        # Intent
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.INTENT_START,
-                data={
-                    "engine": "test-intent-engine",
-                    "language": hass.config.language,
-                    "intent_input": "test-intent-text",
-                    "conversation_id": conversation_id,
-                    "device_id": device_id,
-                },
+            # Correct wake word detection
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.WAKE_WORD_END,
+                    data={"wake_word_output": {"wake_word_phrase": "test-wake-word"}},
+                )
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_START,
-            {},
-        )
-        assert satellite.state == AssistSatelliteState.PROCESSING
-
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.INTENT_END,
-                data={"intent_output": {"conversation_id": conversation_id}},
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_WAKE_WORD_END,
+                {},
             )
-        )
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END,
-            {"conversation_id": conversation_id},
-        )
 
-        # TTS
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.TTS_START,
-                data={
-                    "engine": "test-stt-engine",
-                    "language": hass.config.language,
-                    "voice": "test-voice",
-                    "tts_input": "test-tts-text",
-                },
+            # STT
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.STT_START,
+                    data={"engine": "test-stt-engine", "metadata": {}},
+                )
             )
-        )
 
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START,
-            {"text": "test-tts-text"},
-        )
-        assert satellite.state == AssistSatelliteState.RESPONDING
-
-        # Should return mock_wav audio
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.TTS_END,
-                data={"tts_output": {"url": media_url, "media_id": media_id}},
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_STT_START,
+                {},
             )
-        )
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END,
-            {"url": media_url},
-        )
+            assert satellite.state == AssistSatelliteState.LISTENING_COMMAND
 
-        event_callback(PipelineEvent(type=PipelineEventType.RUN_END))
-        assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
-            VoiceAssistantEventType.VOICE_ASSISTANT_RUN_END,
-            {},
-        )
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "test-stt-text"}},
+                )
+            )
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_STT_END,
+                {"text": "test-stt-text"},
+            )
 
-        # Allow TTS streaming to proceed
-        stream_tts_audio_ready.set()
+            # Intent
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.INTENT_START,
+                    data={
+                        "engine": "test-intent-engine",
+                        "language": hass.config.language,
+                        "intent_input": "test-intent-text",
+                        "conversation_id": conversation_id,
+                        "device_id": self.device_id,
+                    },
+                )
+            )
+
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_START,
+                {},
+            )
+            assert satellite.state == AssistSatelliteState.PROCESSING
+
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.INTENT_END,
+                    data={"intent_output": {"conversation_id": conversation_id}},
+                )
+            )
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END,
+                {"conversation_id": conversation_id},
+            )
+
+            # TTS
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.TTS_START,
+                    data={
+                        "engine": "test-stt-engine",
+                        "language": hass.config.language,
+                        "voice": "test-voice",
+                        "tts_input": "test-tts-text",
+                    },
+                )
+            )
+
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START,
+                {"text": "test-tts-text"},
+            )
+            assert satellite.state == AssistSatelliteState.RESPONDING
+
+            # Should return mock_wav audio
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.TTS_END,
+                    data={"tts_output": {"url": media_url, "media_id": media_id}},
+                )
+            )
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END,
+                {"url": media_url},
+            )
+
+            event_callback(PipelineEvent(type=PipelineEventType.RUN_END))
+            assert mock_client.send_voice_assistant_event.call_args_list[-1].args == (
+                VoiceAssistantEventType.VOICE_ASSISTANT_RUN_END,
+                {},
+            )
+
+            # Allow TTS streaming to proceed
+            stream_tts_audio_ready.set()
 
     pipeline_finished = asyncio.Event()
     original_handle_pipeline_finished = satellite.handle_pipeline_finished
@@ -346,8 +347,8 @@ async def test_pipeline_api_audio(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.tts.async_get_media_source_audio",
@@ -430,77 +431,78 @@ async def test_pipeline_udp_audio(
 
     mic_audio_event = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, device_id, **kwargs):
-        stt_stream = kwargs["stt_stream"]
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
 
-        chunks = []
-        async for chunk in stt_stream:
-            chunks.append(chunk)
-            mic_audio_event.set()
+            chunks = []
+            async for chunk in stt_stream:
+                chunks.append(chunk)
+                mic_audio_event.set()
 
-        # Verify test UDP audio
-        assert chunks == [b"test-mic"]
+            # Verify test UDP audio
+            assert chunks == [b"test-mic"]
 
-        event_callback = kwargs["event_callback"]
+            event_callback = self.event_callback
 
-        # STT
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.STT_START,
-                data={"engine": "test-stt-engine", "metadata": {}},
+            # STT
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.STT_START,
+                    data={"engine": "test-stt-engine", "metadata": {}},
+                )
             )
-        )
 
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.STT_END,
-                data={"stt_output": {"text": "test-stt-text"}},
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "test-stt-text"}},
+                )
             )
-        )
 
-        # Intent
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.INTENT_START,
-                data={
-                    "engine": "test-intent-engine",
-                    "language": hass.config.language,
-                    "intent_input": "test-intent-text",
-                    "conversation_id": conversation_id,
-                    "device_id": device_id,
-                },
+            # Intent
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.INTENT_START,
+                    data={
+                        "engine": "test-intent-engine",
+                        "language": hass.config.language,
+                        "intent_input": "test-intent-text",
+                        "conversation_id": conversation_id,
+                        "device_id": self.device_id,
+                    },
+                )
             )
-        )
 
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.INTENT_END,
-                data={"intent_output": {"conversation_id": conversation_id}},
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.INTENT_END,
+                    data={"intent_output": {"conversation_id": conversation_id}},
+                )
             )
-        )
 
-        # TTS
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.TTS_START,
-                data={
-                    "engine": "test-stt-engine",
-                    "language": hass.config.language,
-                    "voice": "test-voice",
-                    "tts_input": "test-tts-text",
-                },
+            # TTS
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.TTS_START,
+                    data={
+                        "engine": "test-stt-engine",
+                        "language": hass.config.language,
+                        "voice": "test-voice",
+                        "tts_input": "test-tts-text",
+                    },
+                )
             )
-        )
 
-        # Should return mock_wav audio
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.TTS_END,
-                data={"tts_output": {"url": media_url, "media_id": media_id}},
+            # Should return mock_wav audio
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.TTS_END,
+                    data={"tts_output": {"url": media_url, "media_id": media_id}},
+                )
             )
-        )
 
-        event_callback(PipelineEvent(type=PipelineEventType.RUN_END))
+            event_callback(PipelineEvent(type=PipelineEventType.RUN_END))
 
     pipeline_finished = asyncio.Event()
     original_handle_pipeline_finished = satellite.handle_pipeline_finished
@@ -535,8 +537,8 @@ async def test_pipeline_udp_audio(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.tts.async_get_media_source_audio",
@@ -641,72 +643,73 @@ async def test_pipeline_media_player(
     satellite = get_satellite_entity(hass, mock_device.device_info.mac_address)
     assert satellite is not None
 
-    async def async_pipeline_from_audio_stream(*args, device_id, **kwargs):
-        stt_stream = kwargs["stt_stream"]
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
 
-        async for _chunk in stt_stream:
-            break
+            async for _chunk in stt_stream:
+                break
 
-        event_callback = kwargs["event_callback"]
+            event_callback = self.event_callback
 
-        # STT
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.STT_START,
-                data={"engine": "test-stt-engine", "metadata": {}},
+            # STT
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.STT_START,
+                    data={"engine": "test-stt-engine", "metadata": {}},
+                )
             )
-        )
 
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.STT_END,
-                data={"stt_output": {"text": "test-stt-text"}},
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.STT_END,
+                    data={"stt_output": {"text": "test-stt-text"}},
+                )
             )
-        )
 
-        # Intent
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.INTENT_START,
-                data={
-                    "engine": "test-intent-engine",
-                    "language": hass.config.language,
-                    "intent_input": "test-intent-text",
-                    "conversation_id": conversation_id,
-                    "device_id": device_id,
-                },
+            # Intent
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.INTENT_START,
+                    data={
+                        "engine": "test-intent-engine",
+                        "language": hass.config.language,
+                        "intent_input": "test-intent-text",
+                        "conversation_id": conversation_id,
+                        "device_id": self.device_id,
+                    },
+                )
             )
-        )
 
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.INTENT_END,
-                data={"intent_output": {"conversation_id": conversation_id}},
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.INTENT_END,
+                    data={"intent_output": {"conversation_id": conversation_id}},
+                )
             )
-        )
 
-        # TTS
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.TTS_START,
-                data={
-                    "engine": "test-stt-engine",
-                    "language": hass.config.language,
-                    "voice": "test-voice",
-                    "tts_input": "test-tts-text",
-                },
+            # TTS
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.TTS_START,
+                    data={
+                        "engine": "test-stt-engine",
+                        "language": hass.config.language,
+                        "voice": "test-voice",
+                        "tts_input": "test-tts-text",
+                    },
+                )
             )
-        )
 
-        # Should return mock_wav audio
-        event_callback(
-            PipelineEvent(
-                type=PipelineEventType.TTS_END,
-                data={"tts_output": {"url": media_url, "media_id": media_id}},
+            # Should return mock_wav audio
+            event_callback(
+                PipelineEvent(
+                    type=PipelineEventType.TTS_END,
+                    data={"tts_output": {"url": media_url, "media_id": media_id}},
+                )
             )
-        )
 
-        event_callback(PipelineEvent(type=PipelineEventType.RUN_END))
+            event_callback(PipelineEvent(type=PipelineEventType.RUN_END))
 
     pipeline_finished = asyncio.Event()
     original_handle_pipeline_finished = satellite.handle_pipeline_finished
@@ -730,8 +733,8 @@ async def test_pipeline_media_player(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.tts.async_get_media_source_audio",
@@ -1034,26 +1037,31 @@ async def test_tts_format_from_media_player(
     satellite = get_satellite_entity(hass, mock_device.device_info.mac_address)
     assert satellite is not None
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.called += 1
+            # Should be ANNOUNCEMENT format from media player
+            assert self.tts_audio_output == {
+                tts.ATTR_PREFERRED_FORMAT: "mp3",
+                tts.ATTR_PREFERRED_SAMPLE_RATE: 22050,
+                tts.ATTR_PREFERRED_SAMPLE_CHANNELS: 1,
+                tts.ATTR_PREFERRED_SAMPLE_BYTES: 2,
+            }
+            await super().build()
+
     with patch(
-        "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-    ) as mock_pipeline_from_audio_stream:
+        "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+        MockAudioStreamPipelineBuilder,
+    ):
         await satellite.handle_pipeline_start(
             conversation_id="",
             flags=0,
             audio_settings=VoiceAssistantAudioSettings(),
             wake_word_phrase=None,
         )
-
-        mock_pipeline_from_audio_stream.assert_called_once()
-        kwargs = mock_pipeline_from_audio_stream.call_args_list[0].kwargs
-
-        # Should be ANNOUNCEMENT format from media player
-        assert kwargs.get("tts_audio_output") == {
-            tts.ATTR_PREFERRED_FORMAT: "mp3",
-            tts.ATTR_PREFERRED_SAMPLE_RATE: 22050,
-            tts.ATTR_PREFERRED_SAMPLE_CHANNELS: 1,
-            tts.ATTR_PREFERRED_SAMPLE_BYTES: 2,
-        }
+        assert MockAudioStreamPipelineBuilder.called == 1
 
 
 async def test_tts_minimal_format_from_media_player(
@@ -1104,23 +1112,28 @@ async def test_tts_minimal_format_from_media_player(
     satellite = get_satellite_entity(hass, mock_device.device_info.mac_address)
     assert satellite is not None
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.called += 1
+            # Should be ANNOUNCEMENT format from media player
+            assert self.tts_audio_output == {
+                tts.ATTR_PREFERRED_FORMAT: "mp3",
+            }
+            await super().build()
+
     with patch(
-        "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-    ) as mock_pipeline_from_audio_stream:
+        "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+        MockAudioStreamPipelineBuilder,
+    ):
         await satellite.handle_pipeline_start(
             conversation_id="",
             flags=0,
             audio_settings=VoiceAssistantAudioSettings(),
             wake_word_phrase=None,
         )
-
-        mock_pipeline_from_audio_stream.assert_called_once()
-        kwargs = mock_pipeline_from_audio_stream.call_args_list[0].kwargs
-
-        # Should be ANNOUNCEMENT format from media player
-        assert kwargs.get("tts_audio_output") == {
-            tts.ATTR_PREFERRED_FORMAT: "mp3",
-        }
+        assert MockAudioStreamPipelineBuilder.called == 1
 
 
 async def test_announce_supported_features(
@@ -1371,17 +1384,18 @@ async def test_pipeline_abort(
     chunk_received = asyncio.Event()
     pipeline_aborted = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        stt_stream = kwargs["stt_stream"]
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            stt_stream = self.stt_stream
 
-        try:
-            async for chunk in stt_stream:
-                chunks.append(chunk)
-                chunk_received.set()
-        except asyncio.CancelledError:
-            # Aborting cancels the pipeline task
-            pipeline_aborted.set()
-            raise
+            try:
+                async for chunk in stt_stream:
+                    chunks.append(chunk)
+                    chunk_received.set()
+            except asyncio.CancelledError:
+                # Aborting cancels the pipeline task
+                pipeline_aborted.set()
+                raise
 
     pipeline_finished = asyncio.Event()
     original_handle_pipeline_finished = satellite.handle_pipeline_finished
@@ -1392,8 +1406,8 @@ async def test_pipeline_abort(
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch.object(satellite, "handle_pipeline_finished", handle_pipeline_finished),
     ):

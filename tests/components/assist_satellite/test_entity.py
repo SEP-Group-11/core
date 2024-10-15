@@ -5,17 +5,19 @@ from unittest.mock import patch
 
 import pytest
 
-from homeassistant.components import stt
+from homeassistant.components import assist_pipeline, stt
 from homeassistant.components.assist_pipeline import (
     OPTION_PREFERRED,
     AudioSettings,
     Pipeline,
-    PipelineEvent,
-    PipelineEventType,
     PipelineStage,
     async_get_pipeline,
     async_update_pipeline,
     vad,
+)
+from homeassistant.components.assist_pipeline.pipeline import (
+    PipelineEvent,
+    PipelineEventType,
 )
 from homeassistant.components.assist_satellite import (
     AssistSatelliteAnnouncement,
@@ -44,33 +46,41 @@ async def test_entity_state(
 
     entity.async_set_context(context)
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.called += 1
+            assert self.context is context
+            assert self.event_callback == entity._internal_on_pipeline_event
+            assert self.stt_metadata == stt.SpeechMetadata(
+                language="",
+                format=stt.AudioFormats.WAV,
+                codec=stt.AudioCodecs.PCM,
+                bit_rate=stt.AudioBitRates.BITRATE_16,
+                sample_rate=stt.AudioSampleRates.SAMPLERATE_16000,
+                channel=stt.AudioChannels.CHANNEL_MONO,
+            )
+            assert self.stt_stream is audio_stream
+            assert self.wake_word_phrase is None
+            assert self.pipeline_id is None
+            assert self.tts_audio_output is None
+            assert self.device_id is None
+            assert self.audio_settings == AudioSettings(
+                silence_seconds=vad.VadSensitivity.to_seconds(
+                    vad.VadSensitivity.DEFAULT
+                )
+            )
+            assert self.start_stage == PipelineStage.STT
+            assert self.end_stage == PipelineStage.TTS
+
     with patch(
-        "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream"
-    ) as mock_start_pipeline:
+        "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+        MockAudioStreamPipelineBuilder,
+    ):
         await entity.async_accept_pipeline_from_satellite(audio_stream)
 
-    assert mock_start_pipeline.called
-    kwargs = mock_start_pipeline.call_args[1]
-    assert kwargs["context"] is context
-    assert kwargs["event_callback"] == entity._internal_on_pipeline_event
-    assert kwargs["stt_metadata"] == stt.SpeechMetadata(
-        language="",
-        format=stt.AudioFormats.WAV,
-        codec=stt.AudioCodecs.PCM,
-        bit_rate=stt.AudioBitRates.BITRATE_16,
-        sample_rate=stt.AudioSampleRates.SAMPLERATE_16000,
-        channel=stt.AudioChannels.CHANNEL_MONO,
-    )
-    assert kwargs["stt_stream"] is audio_stream
-    assert kwargs["pipeline_id"] is None
-    assert kwargs["device_id"] is None
-    assert kwargs["tts_audio_output"] is None
-    assert kwargs["wake_word_phrase"] is None
-    assert kwargs["audio_settings"] == AudioSettings(
-        silence_seconds=vad.VadSensitivity.to_seconds(vad.VadSensitivity.DEFAULT)
-    )
-    assert kwargs["start_stage"] == PipelineStage.STT
-    assert kwargs["end_stage"] == PipelineStage.TTS
+    assert MockAudioStreamPipelineBuilder.called == 1
 
     for event_type, event_data, expected_state in (
         (PipelineEventType.RUN_START, {}, AssistSatelliteState.LISTENING_WAKE_WORD),
@@ -99,7 +109,7 @@ async def test_entity_state(
         (PipelineEventType.TTS_END, {}, AssistSatelliteState.RESPONDING),
         (PipelineEventType.ERROR, {}, AssistSatelliteState.RESPONDING),
     ):
-        kwargs["event_callback"](PipelineEvent(event_type, event_data))
+        entity._internal_on_pipeline_event(PipelineEvent(event_type, event_data))
         state = hass.states.get(ENTITY_ID)
         assert state.state == expected_state, event_type
 
@@ -119,25 +129,26 @@ async def test_new_pipeline_cancels_pipeline(
     pipeline1_cancelled = asyncio.Event()
     pipeline2_finished = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        if not pipeline1_started.is_set():
-            # First pipeline run
-            pipeline1_started.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            if not pipeline1_started.is_set():
+                # First pipeline run
+                pipeline1_started.set()
 
-            # Wait for pipeline to be cancelled
-            try:
-                await pipeline1_finished.wait()
-            except asyncio.CancelledError:
-                pipeline1_cancelled.set()
-                raise
-        else:
-            # Second pipeline run
-            pipeline2_finished.set()
+                # Wait for pipeline to be cancelled
+                try:
+                    await pipeline1_finished.wait()
+                except asyncio.CancelledError:
+                    pipeline1_cancelled.set()
+                    raise
+            else:
+                # Second pipeline run
+                pipeline2_finished.set()
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
     ):
         hass.async_create_task(
@@ -289,20 +300,21 @@ async def test_announce_cancels_pipeline(
     pipeline_finished = asyncio.Event()
     pipeline_cancelled = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, **kwargs):
-        pipeline_started.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            pipeline_started.set()
 
-        # Wait for pipeline to be cancelled
-        try:
-            await pipeline_finished.wait()
-        except asyncio.CancelledError:
-            pipeline_cancelled.set()
-            raise
+            # Wait for pipeline to be cancelled
+            try:
+                await pipeline_finished.wait()
+            except asyncio.CancelledError:
+                pipeline_cancelled.set()
+                raise
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch.object(entity, "async_announce") as mock_async_announce,
     ):
@@ -329,8 +341,13 @@ async def test_context_refresh(
     # Remove context
     entity._context = None
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            pass
+
     with patch(
-        "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream"
+        "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+        MockAudioStreamPipelineBuilder,
     ):
         await entity.async_accept_pipeline_from_satellite(audio_stream)
 
@@ -363,14 +380,15 @@ async def test_pipeline_entity(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, pipeline_id: str, **kwargs):
-        assert pipeline_id == pipeline.id
-        done.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            assert self.pipeline_id == pipeline.id
+            done.set()
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.assist_satellite.entity.async_get_pipelines",
@@ -394,15 +412,16 @@ async def test_pipeline_entity_preferred(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(*args, pipeline_id: str, **kwargs):
-        # Preferred pipeline
-        assert pipeline_id is None
-        done.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            # Preferred pipeline
+            assert self.pipeline_id is None
+            done.set()
 
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-            new=async_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            new=MockAudioStreamPipelineBuilder,
         ),
     ):
         async with asyncio.timeout(1):
@@ -422,18 +441,17 @@ async def test_vad_sensitivity_entity(
 
     done = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(
-        *args, audio_settings: AudioSettings, **kwargs
-    ):
-        # Verify vad sensitivity
-        assert audio_settings.silence_seconds == vad.VadSensitivity.to_seconds(
-            vad.VadSensitivity.AGGRESSIVE
-        )
-        done.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            # Verify vad sensitivity
+            assert self.audio_settings.silence_seconds == vad.VadSensitivity.to_seconds(
+                vad.VadSensitivity.AGGRESSIVE
+            )
+            done.set()
 
     with patch(
-        "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-        new=async_pipeline_from_audio_stream,
+        "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+        new=MockAudioStreamPipelineBuilder,
     ):
         async with asyncio.timeout(1):
             await entity.async_accept_pipeline_from_satellite(audio_stream)

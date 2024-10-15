@@ -7,6 +7,7 @@ from unittest.mock import patch
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 
+from homeassistant.components import assist_pipeline
 from homeassistant.components.assist_pipeline import PipelineStage
 from homeassistant.components.assist_satellite.websocket_api import (
     CONNECTION_TEST_TIMEOUT,
@@ -265,10 +266,17 @@ async def test_intercept_wake_word_unsubscribe(
     await ws_client.close()
     await task
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.called += 1
+
     with (
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
-        ) as mock_pipeline_from_audio_stream,
+            "homeassistant.components.assist_satellite.entity.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
+        ),
     ):
         # Start a pipeline with a wake word
         await entity.async_accept_pipeline_from_satellite(
@@ -277,7 +285,7 @@ async def test_intercept_wake_word_unsubscribe(
         )
 
         # Wake word should not be intercepted
-        mock_pipeline_from_audio_stream.assert_called_once()
+        assert MockAudioStreamPipelineBuilder.called == 1
 
 
 async def test_get_configuration(

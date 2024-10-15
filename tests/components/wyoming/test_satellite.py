@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import patch
 import wave
 
+import pytest
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
@@ -216,23 +217,20 @@ async def test_satellite_pipeline(hass: HomeAssistant) -> None:
     run_pipeline_called = asyncio.Event()
     audio_chunk_received = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(
-        hass: HomeAssistant,
-        context,
-        event_callback,
-        stt_metadata,
-        stt_stream,
-        **kwargs,
-    ) -> None:
-        nonlocal pipeline_kwargs, pipeline_event_callback
-        pipeline_kwargs = kwargs
-        pipeline_event_callback = event_callback
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        device_id = None
 
-        run_pipeline_called.set()
-        async for chunk in stt_stream:
-            if chunk:
-                audio_chunk_received.set()
-                break
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.device_id = self.device_id
+            nonlocal pipeline_kwargs, pipeline_event_callback
+            # pipeline_kwargs = kwargs
+            pipeline_event_callback = self.event_callback
+
+            run_pipeline_called.set()
+            async for chunk in self.stt_stream:
+                if chunk:
+                    audio_chunk_received.set()
+                    break
 
     with (
         patch(
@@ -244,8 +242,8 @@ async def test_satellite_pipeline(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            async_pipeline_from_audio_stream,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.wyoming.satellite.tts.async_get_media_source_audio",
@@ -269,7 +267,7 @@ async def test_satellite_pipeline(hass: HomeAssistant) -> None:
             run_pipeline_called.clear()
 
         assert pipeline_event_callback is not None
-        assert pipeline_kwargs.get("device_id") == device.device_id
+        assert MockAudioStreamPipelineBuilder.device_id == device.device_id
 
         # Test a ping
         mock_client.inject_event(Ping("test-ping").event())
@@ -564,6 +562,10 @@ async def test_satellite_disconnect_before_pipeline(hass: HomeAssistant) -> None
         self.stop()
         on_restart_event.set()
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        async def build(self) -> None:
+            pytest.fail("Should not be called")
+
     with (
         patch(
             "homeassistant.components.wyoming.data.load_wyoming_info",
@@ -574,8 +576,9 @@ async def test_satellite_disconnect_before_pipeline(hass: HomeAssistant) -> None
             MockAsyncTcpClient([]),  # no RunPipeline event
         ),
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-        ) as mock_run_pipeline,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
+        ),
         patch(
             "homeassistant.components.wyoming.satellite.WyomingSatellite.on_restart",
             on_restart,
@@ -584,9 +587,6 @@ async def test_satellite_disconnect_before_pipeline(hass: HomeAssistant) -> None
         await setup_config_entry(hass)
         async with asyncio.timeout(1):
             await on_restart_event.wait()
-
-        # Pipeline should never have run
-        mock_run_pipeline.assert_not_called()
 
 
 async def test_satellite_disconnect_during_pipeline(hass: HomeAssistant) -> None:
@@ -609,6 +609,12 @@ async def test_satellite_disconnect_during_pipeline(hass: HomeAssistant) -> None
     async def on_stopped(self):
         on_stopped_event.set()
 
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.called += 1
+
     with (
         patch(
             "homeassistant.components.wyoming.data.load_wyoming_info",
@@ -619,8 +625,9 @@ async def test_satellite_disconnect_during_pipeline(hass: HomeAssistant) -> None
             MockAsyncTcpClient(events),
         ),
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-        ) as mock_run_pipeline,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
+        ),
         patch(
             "homeassistant.components.wyoming.satellite.WyomingSatellite.on_restart",
             on_restart,
@@ -640,7 +647,7 @@ async def test_satellite_disconnect_during_pipeline(hass: HomeAssistant) -> None
             await on_stopped_event.wait()
 
         # Pipeline should have run once
-        mock_run_pipeline.assert_called_once()
+        assert MockAudioStreamPipelineBuilder.called == 1
 
         # Sensor should have been turned off
         assert not device.is_active
@@ -656,8 +663,14 @@ async def test_satellite_error_during_pipeline(hass: HomeAssistant) -> None:
 
     pipeline_event = asyncio.Event()
 
-    def _async_pipeline_from_audio_stream(*args: Any, **kwargs: Any) -> None:
-        pipeline_event.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+        event_callback = None
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.event_callback = self.event_callback
+            MockAudioStreamPipelineBuilder.called += 1
+            pipeline_event.set()
 
     with (
         patch(
@@ -669,9 +682,9 @@ async def test_satellite_error_during_pipeline(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            wraps=_async_pipeline_from_audio_stream,
-        ) as mock_run_pipeline,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
+        ),
     ):
         await setup_config_entry(hass)
 
@@ -680,8 +693,8 @@ async def test_satellite_error_during_pipeline(hass: HomeAssistant) -> None:
             await mock_client.connect_event.wait()
             await mock_client.run_satellite_event.wait()
 
-        mock_run_pipeline.assert_called_once()
-        event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
+        assert MockAudioStreamPipelineBuilder.called == 1
+        event_callback = MockAudioStreamPipelineBuilder.event_callback
         event_callback(
             assist_pipeline.PipelineEvent(
                 assist_pipeline.PipelineEventType.ERROR,
@@ -715,8 +728,14 @@ async def test_tts_not_wav(hass: HomeAssistant) -> None:
     ]
     pipeline_event = asyncio.Event()
 
-    def _async_pipeline_from_audio_stream(*args: Any, **kwargs: Any) -> None:
-        pipeline_event.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+        event_callback = None
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.event_callback = self.event_callback
+            MockAudioStreamPipelineBuilder.called += 1
+            pipeline_event.set()
 
     with (
         patch(
@@ -728,9 +747,9 @@ async def test_tts_not_wav(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            wraps=_async_pipeline_from_audio_stream,
-        ) as mock_run_pipeline,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
+        ),
         patch(
             "homeassistant.components.wyoming.satellite.tts.async_get_media_source_audio",
             return_value=("mp3", bytes(1)),
@@ -747,8 +766,8 @@ async def test_tts_not_wav(hass: HomeAssistant) -> None:
             await mock_client.connect_event.wait()
             await mock_client.run_satellite_event.wait()
 
-        mock_run_pipeline.assert_called_once()
-        event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
+        assert MockAudioStreamPipelineBuilder.called == 1
+        event_callback = MockAudioStreamPipelineBuilder.event_callback
 
         # Text-to-speech text
         event_callback(
@@ -796,22 +815,17 @@ async def test_pipeline_changed(hass: HomeAssistant) -> None:
     run_pipeline_called = asyncio.Event()
     pipeline_stopped = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(
-        hass: HomeAssistant,
-        context,
-        event_callback,
-        stt_metadata,
-        stt_stream,
-        **kwargs,
-    ) -> None:
-        nonlocal pipeline_event_callback
-        pipeline_event_callback = event_callback
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
 
-        run_pipeline_called.set()
-        async for _chunk in stt_stream:
-            pass
+        async def build(self) -> None:
+            nonlocal pipeline_event_callback
+            pipeline_event_callback = self.event_callback
+            run_pipeline_called.set()
+            async for _chunk in self.stt_stream:
+                pass
 
-        pipeline_stopped.set()
+            pipeline_stopped.set()
 
     with (
         patch(
@@ -823,8 +837,8 @@ async def test_pipeline_changed(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            async_pipeline_from_audio_stream,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
         ),
     ):
         entry = await setup_config_entry(hass)
@@ -870,22 +884,18 @@ async def test_audio_settings_changed(hass: HomeAssistant) -> None:
     run_pipeline_called = asyncio.Event()
     pipeline_stopped = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(
-        hass: HomeAssistant,
-        context,
-        event_callback,
-        stt_metadata,
-        stt_stream,
-        **kwargs,
-    ) -> None:
-        nonlocal pipeline_event_callback
-        pipeline_event_callback = event_callback
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
 
-        run_pipeline_called.set()
-        async for _chunk in stt_stream:
-            pass
+        async def build(self) -> None:
+            nonlocal pipeline_event_callback
+            pipeline_event_callback = self.event_callback
 
-        pipeline_stopped.set()
+            run_pipeline_called.set()
+            async for _chunk in self.stt_stream:
+                pass
+
+            pipeline_stopped.set()
 
     with (
         patch(
@@ -897,8 +907,8 @@ async def test_audio_settings_changed(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            async_pipeline_from_audio_stream,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
         ),
     ):
         entry = await setup_config_entry(hass)
@@ -1006,22 +1016,18 @@ async def test_client_stops_pipeline(hass: HomeAssistant) -> None:
     run_pipeline_called = asyncio.Event()
     pipeline_stopped = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(
-        hass: HomeAssistant,
-        context,
-        event_callback,
-        stt_metadata,
-        stt_stream,
-        **kwargs,
-    ) -> None:
-        nonlocal pipeline_event_callback
-        pipeline_event_callback = event_callback
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
 
-        run_pipeline_called.set()
-        async for _chunk in stt_stream:
-            pass
+        async def build(self) -> None:
+            nonlocal pipeline_event_callback
+            pipeline_event_callback = self.event_callback
 
-        pipeline_stopped.set()
+            run_pipeline_called.set()
+            async for _chunk in self.stt_stream:
+                pass
+
+            pipeline_stopped.set()
 
     with (
         patch(
@@ -1033,8 +1039,8 @@ async def test_client_stops_pipeline(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            async_pipeline_from_audio_stream,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
         ),
     ):
         entry = await setup_config_entry(hass)
@@ -1074,8 +1080,14 @@ async def test_wake_word_phrase(hass: HomeAssistant) -> None:
 
     pipeline_event = asyncio.Event()
 
-    def _async_pipeline_from_audio_stream(*args: Any, **kwargs: Any) -> None:
-        pipeline_event.set()
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+        wake_word_phrase = None
+
+        async def build(self) -> None:
+            MockAudioStreamPipelineBuilder.wake_word_phrase = self.wake_word_phrase
+            MockAudioStreamPipelineBuilder.called += 1
+            pipeline_event.set()
 
     with (
         patch(
@@ -1087,21 +1099,19 @@ async def test_wake_word_phrase(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ),
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            wraps=_async_pipeline_from_audio_stream,
-        ) as mock_run_pipeline,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
+        ),
     ):
         await setup_config_entry(hass)
 
         async with asyncio.timeout(1):
             await pipeline_event.wait()
 
-        # async_pipeline_from_audio_stream will receive the wake word phrase for
+        # MockAudioStreamPipelineBuilder will receive the wake word phrase for
         # deconfliction.
-        mock_run_pipeline.assert_called_once()
-        assert (
-            mock_run_pipeline.call_args.kwargs.get("wake_word_phrase") == "Test Phrase"
-        )
+        assert MockAudioStreamPipelineBuilder.called == 1
+        assert MockAudioStreamPipelineBuilder.wake_word_phrase == "Test Phrase"
 
 
 async def test_timers(hass: HomeAssistant) -> None:
@@ -1299,25 +1309,26 @@ async def test_satellite_conversation_id(hass: HomeAssistant) -> None:
         ).event(),
     ]
 
-    pipeline_kwargs: dict[str, Any] = {}
     pipeline_event_callback: Callable[[assist_pipeline.PipelineEvent], None] | None = (
         None
     )
     run_pipeline_called = asyncio.Event()
 
-    async def async_pipeline_from_audio_stream(
-        hass: HomeAssistant,
-        context,
-        event_callback,
-        stt_metadata,
-        stt_stream,
-        **kwargs,
-    ) -> None:
-        nonlocal pipeline_kwargs, pipeline_event_callback
-        pipeline_kwargs = kwargs
-        pipeline_event_callback = event_callback
+    class MockAudioStreamPipelineBuilder(assist_pipeline.AudioStreamPipelineBuilder):
+        called = 0
+        conversation_id = None
+        wake_word_phrase = None
 
-        run_pipeline_called.set()
+        def __init__(self, hass: HomeAssistant) -> None:
+            super().__init__(hass)
+            MockAudioStreamPipelineBuilder.conversation_id = None
+
+        async def build(self) -> None:
+            nonlocal pipeline_event_callback
+            MockAudioStreamPipelineBuilder.conversation_id = self.conversation_id
+            pipeline_event_callback = self.event_callback
+
+            run_pipeline_called.set()
 
     with (
         patch(
@@ -1329,8 +1340,8 @@ async def test_satellite_conversation_id(hass: HomeAssistant) -> None:
             SatelliteAsyncTcpClient(events),
         ) as mock_client,
         patch(
-            "homeassistant.components.wyoming.satellite.assist_pipeline.async_pipeline_from_audio_stream",
-            async_pipeline_from_audio_stream,
+            "homeassistant.components.wyoming.satellite.assist_pipeline.AudioStreamPipelineBuilder",
+            MockAudioStreamPipelineBuilder,
         ),
         patch(
             "homeassistant.components.wyoming.satellite.tts.async_get_media_source_audio",
@@ -1353,12 +1364,11 @@ async def test_satellite_conversation_id(hass: HomeAssistant) -> None:
         assert pipeline_event_callback is not None
 
         # A conversation id should have been generated
-        conversation_id = pipeline_kwargs.get("conversation_id")
+        conversation_id = MockAudioStreamPipelineBuilder.conversation_id
         assert conversation_id
 
         # Reset and run again
         run_pipeline_called.clear()
-        pipeline_kwargs.clear()
 
         pipeline_event_callback(
             assist_pipeline.PipelineEvent(assist_pipeline.PipelineEventType.RUN_END)
@@ -1368,12 +1378,11 @@ async def test_satellite_conversation_id(hass: HomeAssistant) -> None:
             await run_pipeline_called.wait()
 
         # Should be the same conversation id
-        assert pipeline_kwargs.get("conversation_id") == conversation_id
+        assert MockAudioStreamPipelineBuilder.conversation_id == conversation_id
 
         # Reset and run again, but this time "time out"
         satellite._conversation_id_time = None
         run_pipeline_called.clear()
-        pipeline_kwargs.clear()
 
         pipeline_event_callback(
             assist_pipeline.PipelineEvent(assist_pipeline.PipelineEventType.RUN_END)
@@ -1383,6 +1392,6 @@ async def test_satellite_conversation_id(hass: HomeAssistant) -> None:
             await run_pipeline_called.wait()
 
         # Should be a different conversation id
-        new_conversation_id = pipeline_kwargs.get("conversation_id")
+        new_conversation_id = MockAudioStreamPipelineBuilder.conversation_id
         assert new_conversation_id
         assert new_conversation_id != conversation_id
