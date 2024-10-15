@@ -65,15 +65,21 @@ class AlexaFlashBriefingView(http.HomeAssistantView):
 
         briefing_config = self.flash_briefings.get(briefing_id)
         if not isinstance(briefing_config, list):
-            _LOGGER.error("No configured Alexa flash briefing was found for: %s", briefing_id)
+            _LOGGER.error(
+                "No configured Alexa flash briefing was found for: %s", briefing_id
+            )
             return b"", HTTPStatus.NOT_FOUND
 
         briefing = self._generate_briefing(briefing_config)
         return self.json(briefing)
 
-    def _authenticate(self, request: http.HomeAssistantRequest, briefing_id: str) -> bool:
+    def _authenticate(
+        self, request: http.HomeAssistantRequest, briefing_id: str
+    ) -> bool:
         if request.query.get(API_PASSWORD) is None:
-            _LOGGER.error("No password provided for Alexa flash briefing: %s", briefing_id)
+            _LOGGER.error(
+                "No password provided for Alexa flash briefing: %s", briefing_id
+            )
             return False
 
         if not hmac.compare_digest(
@@ -93,7 +99,7 @@ class AlexaFlashBriefingView(http.HomeAssistantView):
         return briefing
 
     def _process_briefing_item(self, item: dict) -> dict:
-        output = {}
+        output: dict[str, str] = {}
         self._add_text_field(output, item, CONF_TITLE, ATTR_TITLE_TEXT)
         self._add_text_field(output, item, CONF_TEXT, ATTR_MAIN_TEXT)
         self._add_uid(output, item)
@@ -102,8 +108,10 @@ class AlexaFlashBriefingView(http.HomeAssistantView):
         output[ATTR_UPDATE_DATE] = dt_util.utcnow().strftime(DATE_FORMAT)
         return output
 
-    def _add_text_field(self, output: dict, item: dict, conf_key: str, attr_key: str) -> None:
-        """adds a text field to the output"""
+    def _add_text_field(
+        self, output: dict, item: dict, conf_key: str, attr_key: str
+    ) -> None:
+        """Add a text field to the output."""
         if item.get(conf_key) is not None:
             if isinstance(item.get(conf_key), template.Template):
                 output[attr_key] = item[conf_key].async_render(parse_result=False)
@@ -111,7 +119,7 @@ class AlexaFlashBriefingView(http.HomeAssistantView):
                 output[attr_key] = item.get(conf_key)
 
     def _add_uid(self, output: dict, item: dict) -> None:
-        """adds a unique identifier to the output"""
+        """Add a unique identifier to the output."""
         uid = item.get(CONF_UID)
         if uid is None:
             uid = str(uuid.uuid4())
