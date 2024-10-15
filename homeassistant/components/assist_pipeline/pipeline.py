@@ -125,97 +125,102 @@ def _async_resolve_default_pipeline_settings(
     tts_engine_id: str | None = None,
     pipeline_name: str,
 ) -> dict[str, str | None]:
-    """Resolve settings for a default pipeline.
+    """Resolve settings for a default pipeline."""
+    settings = {
+        "conversation_engine": conversation_engine_id
+        or conversation.HOME_ASSISTANT_AGENT,
+        "language": hass.config.language,
+        "name": pipeline_name,
+        "wake_word_entity": None,
+        "wake_word_id": None,
+    }
+    assert settings["conversation_engine"] is not None
+    pipeline_language, conversation_settings = _resolve_conversation_settings(
+        hass, settings["conversation_engine"]
+    )
+    settings.update(conversation_settings)
+    settings.update(_resolve_stt_settings(hass, stt_engine_id, pipeline_language))
+    assert settings["language"] is not None
+    settings.update(_resolve_tts_settings(hass, tts_engine_id, settings["language"]))
 
-    The default pipeline will use the homeassistant conversation agent and the
-    default stt / tts engines if none are specified.
-    """
-    conversation_language = "en"
-    pipeline_language = "en"
-    stt_engine = None
-    stt_language = None
-    tts_engine = None
-    tts_language = None
-    tts_voice = None
-    wake_word_entity = None
-    wake_word_id = None
+    return settings
 
-    if conversation_engine_id is None:
-        conversation_engine_id = conversation.HOME_ASSISTANT_AGENT
 
-    # Find a matching language supported by the Home Assistant conversation agent
+def _resolve_conversation_settings(
+    hass: HomeAssistant, engine_id: str
+) -> tuple[str, dict[str, str]]:
+    pipeline_language: str
     conversation_languages = language_util.matches(
         hass.config.language,
-        conversation.async_get_conversation_languages(hass, conversation_engine_id),
+        conversation.async_get_conversation_languages(hass, engine_id),
         country=hass.config.country,
     )
     if conversation_languages:
         pipeline_language = hass.config.language
-        conversation_language = conversation_languages[0]
+    else:
+        pipeline_language = "en"
+    return pipeline_language, {
+        "conversation_language": conversation_languages[0]
+        if conversation_languages
+        else "en",
+    }
 
-    if stt_engine_id is None:
-        stt_engine_id = stt.async_default_engine(hass)
 
-    if stt_engine_id is not None:
-        stt_engine = stt.async_get_speech_to_text_engine(hass, stt_engine_id)
-        if stt_engine is None:
-            stt_engine_id = None
+def _resolve_stt_settings(
+    hass: HomeAssistant, engine_id: str | None, pipeline_language: str
+) -> dict[str, str | None]:
+    if not engine_id:
+        engine_id = stt.async_default_engine(hass)
 
-    if stt_engine:
-        stt_languages = language_util.matches(
+    engine = stt.async_get_speech_to_text_engine(hass, engine_id) if engine_id else None
+    if not engine:
+        return {"stt_engine": None, "stt_language": None}
+
+    stt_languages = language_util.matches(
+        pipeline_language,
+        engine.supported_languages,
+        country=hass.config.country,
+    )
+    stt_language: str | None = None
+    if stt_languages:
+        stt_language = stt_languages[0]
+    else:
+        _LOGGER.debug(
+            "Speech-to-text engine '%s' does not support language '%s'",
+            engine_id,
             pipeline_language,
-            stt_engine.supported_languages,
-            country=hass.config.country,
         )
-        if stt_languages:
-            stt_language = stt_languages[0]
-        else:
-            _LOGGER.debug(
-                "Speech-to-text engine '%s' does not support language '%s'",
-                stt_engine_id,
-                pipeline_language,
-            )
-            stt_engine_id = None
-
-    if tts_engine_id is None:
-        tts_engine_id = tts.async_default_engine(hass)
-
-    if tts_engine_id is not None:
-        tts_engine = tts.get_engine_instance(hass, tts_engine_id)
-        if tts_engine is None:
-            tts_engine_id = None
-
-    if tts_engine:
-        tts_languages = language_util.matches(
-            pipeline_language,
-            tts_engine.supported_languages,
-            country=hass.config.country,
-        )
-        if tts_languages:
-            tts_language = tts_languages[0]
-            tts_voices = tts_engine.async_get_supported_voices(tts_language)
-            if tts_voices:
-                tts_voice = tts_voices[0].voice_id
-        else:
-            _LOGGER.debug(
-                "Text-to-speech engine '%s' does not support language '%s'",
-                tts_engine_id,
-                pipeline_language,
-            )
-            tts_engine_id = None
-
+        engine_id = None
     return {
-        "conversation_engine": conversation_engine_id,
-        "conversation_language": conversation_language,
-        "language": hass.config.language,
-        "name": pipeline_name,
-        "stt_engine": stt_engine_id,
+        "stt_engine": engine_id,
         "stt_language": stt_language,
-        "tts_engine": tts_engine_id,
+    }
+
+
+def _resolve_tts_settings(
+    hass: HomeAssistant, engine_id: str | None, language: str
+) -> dict[str, str | None]:
+    if not engine_id:
+        engine_id = tts.async_default_engine(hass)
+
+    engine = tts.get_engine_instance(hass, engine_id) if engine_id else None
+    if not engine:
+        return {"tts_engine": None, "tts_language": None, "tts_voice": None}
+
+    tts_languages = language_util.matches(
+        language,
+        engine.supported_languages,
+        country=hass.config.country,
+    )
+    if not tts_languages:
+        return {"tts_engine": None, "tts_language": None, "tts_voice": None}
+
+    tts_language = tts_languages[0]
+    tts_voices = engine.async_get_supported_voices(tts_language)
+    return {
+        "tts_engine": engine_id,
         "tts_language": tts_language,
-        "tts_voice": tts_voice,
-        "wake_word_entity": wake_word_entity,
-        "wake_word_id": wake_word_id,
+        "tts_voice": tts_voices[0].voice_id if tts_voices else None,
     }
 
 
