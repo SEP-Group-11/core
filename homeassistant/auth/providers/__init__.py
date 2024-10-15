@@ -168,20 +168,31 @@ async def load_auth_provider_module(
         ) from err
 
     if hass.config.skip_pip or not hasattr(module, "REQUIREMENTS"):
-        return module
+        if hasattr(module, "REQUIREMENTS"):
+            _LOGGER.warning(
+                "Auth provider %s has requirements but pip is skipped", provider
+            )
+        return module  # Return the module if pip is skipped or no requirements
 
     if (processed := hass.data.get(DATA_REQS)) is None:
         processed = hass.data[DATA_REQS] = set()
     elif provider in processed:
-        return module
+        raise HomeAssistantError(f"Auth provider {provider} has already been processed")
 
     reqs = module.REQUIREMENTS
-    await requirements.async_process_requirements(
-        hass, f"auth provider {provider}", reqs
-    )
-
-    processed.add(provider)
-    return module
+    try:
+        await requirements.async_process_requirements(
+            hass, f"auth provider {provider}", reqs
+        )
+        processed.add(provider)
+        return module  # Return the module after processing requirements  # noqa: TRY300
+    except Exception as err:
+        _LOGGER.error(
+            "Failed to process requirements for auth provider %s: %s", provider, err
+        )
+        raise HomeAssistantError(
+            f"Failed to process requirements for auth provider {provider}: {err}"
+        ) from err
 
 
 class LoginFlow(data_entry_flow.FlowHandler[AuthFlowResult, tuple[str, str]]):
