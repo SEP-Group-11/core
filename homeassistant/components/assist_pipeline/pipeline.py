@@ -5,7 +5,7 @@ from __future__ import annotations
 import array
 import asyncio
 from collections import defaultdict, deque
-from collections.abc import AsyncGenerator, AsyncIterable, Callable
+from collections.abc import AsyncGenerator, AsyncIterable, Callable, Coroutine
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 import logging
@@ -1440,11 +1440,13 @@ class PipelineInput:
 
     async def validate(self) -> None:
         """Validate pipeline input against start stage."""
+        self._validate_input()
+        self._validate_pipeline_support()
+        await self._prepare_stages()
+
+    def _validate_input(self) -> None:
+        """Validate input based on start stage."""
         if self.run.start_stage in (PipelineStage.WAKE_WORD, PipelineStage.STT):
-            if self.run.pipeline.stt_engine is None:
-                raise PipelineRunValidationError(
-                    "the pipeline does not support speech-to-text"
-                )
             if self.stt_metadata is None:
                 raise PipelineRunValidationError(
                     "stt_metadata is required for speech-to-text"
@@ -1463,45 +1465,48 @@ class PipelineInput:
                 raise PipelineRunValidationError(
                     "tts_input is required for text-to-speech"
                 )
-        if self.run.end_stage == PipelineStage.TTS:
-            if self.run.pipeline.tts_engine is None:
-                raise PipelineRunValidationError(
-                    "the pipeline does not support text-to-speech"
-                )
 
-        start_stage_index = PIPELINE_STAGE_ORDER.index(self.run.start_stage)
-        end_stage_index = PIPELINE_STAGE_ORDER.index(self.run.end_stage)
+    def _validate_pipeline_support(self) -> None:
+        """Validate pipeline support for required stages."""
+        if (
+            self.run.start_stage in (PipelineStage.WAKE_WORD, PipelineStage.STT)
+            and self.run.pipeline.stt_engine is None
+        ):
+            raise PipelineRunValidationError(
+                "the pipeline does not support speech-to-text"
+            )
+        if (
+            self.run.end_stage == PipelineStage.TTS
+            and self.run.pipeline.tts_engine is None
+        ):
+            raise PipelineRunValidationError(
+                "the pipeline does not support text-to-speech"
+            )
+
+    async def _prepare_stages(self) -> None:
+        """Prepare stages based on start and end stages."""
+        start_index = PIPELINE_STAGE_ORDER.index(self.run.start_stage)
+        end_index = PIPELINE_STAGE_ORDER.index(self.run.end_stage)
 
         prepare_tasks = []
 
-        if (
-            start_stage_index
-            <= PIPELINE_STAGE_ORDER.index(PipelineStage.WAKE_WORD)
-            <= end_stage_index
+        def _prepare_speech_to_text() -> (
+            Coroutine[PipelineInput, stt.SpeechMetadata, None]
         ):
-            prepare_tasks.append(self.run.prepare_wake_word_detection())
+            assert self.stt_metadata is not None
+            return self.run.prepare_speech_to_text(self.stt_metadata)
 
-        if (
-            start_stage_index
-            <= PIPELINE_STAGE_ORDER.index(PipelineStage.STT)
-            <= end_stage_index
+        for stage, prepare_method in (
+            (PipelineStage.WAKE_WORD, self.run.prepare_wake_word_detection),
+            (
+                PipelineStage.STT,
+                _prepare_speech_to_text,
+            ),
+            (PipelineStage.INTENT, self.run.prepare_recognize_intent),
+            (PipelineStage.TTS, self.run.prepare_text_to_speech),
         ):
-            # self.stt_metadata can't be None or we'd raise above
-            prepare_tasks.append(self.run.prepare_speech_to_text(self.stt_metadata))  # type: ignore[arg-type]
-
-        if (
-            start_stage_index
-            <= PIPELINE_STAGE_ORDER.index(PipelineStage.INTENT)
-            <= end_stage_index
-        ):
-            prepare_tasks.append(self.run.prepare_recognize_intent())
-
-        if (
-            start_stage_index
-            <= PIPELINE_STAGE_ORDER.index(PipelineStage.TTS)
-            <= end_stage_index
-        ):
-            prepare_tasks.append(self.run.prepare_text_to_speech())
+            if start_index <= PIPELINE_STAGE_ORDER.index(stage) <= end_index:
+                prepare_tasks.append(prepare_method())
 
         if prepare_tasks:
             await asyncio.gather(*prepare_tasks)
