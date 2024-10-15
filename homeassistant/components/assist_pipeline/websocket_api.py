@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator, Callable
 import contextlib
 import logging
 import math
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import voluptuous as vol
 
@@ -418,32 +418,17 @@ def websocket_list_languages(
     tts_language_tags = tts.async_get_text_to_speech_languages(hass)
     pipeline_languages: set[str] | None = None
 
-    if conv_language_tags and conv_language_tags != MATCH_ALL:
-        languages = set()
-        for language_tag in conv_language_tags:
-            dialect = language_util.Dialect.parse(language_tag)
-            languages.add(dialect.language)
-        pipeline_languages = languages
+    pipeline_languages = _list_languages_for_conv(conv_language_tags)
 
     if stt_language_tags:
-        languages = set()
-        for language_tag in stt_language_tags:
-            dialect = language_util.Dialect.parse(language_tag)
-            languages.add(dialect.language)
-        if pipeline_languages is not None:
-            pipeline_languages = language_util.intersect(pipeline_languages, languages)
-        else:
-            pipeline_languages = languages
+        pipeline_languages = _list_languages_for_stt(
+            stt_language_tags, pipeline_languages
+        )
 
     if tts_language_tags:
-        languages = set()
-        for language_tag in tts_language_tags:
-            dialect = language_util.Dialect.parse(language_tag)
-            languages.add(dialect.language)
-        if pipeline_languages is not None:
-            pipeline_languages = language_util.intersect(pipeline_languages, languages)
-        else:
-            pipeline_languages = languages
+        pipeline_languages = _list_languages_for_tts(
+            tts_language_tags, pipeline_languages
+        )
 
     connection.send_result(
         msg["id"],
@@ -453,6 +438,45 @@ def websocket_list_languages(
             )
         },
     )
+
+
+def _list_languages_for_tts(
+    tts_language_tags: set[str],
+    pipeline_languages: set[str] | None,
+) -> set[str]:
+    languages = set()
+    for language_tag in tts_language_tags:
+        dialect = language_util.Dialect.parse(language_tag)
+        languages.add(dialect.language)
+    if pipeline_languages is not None:
+        pipeline_languages = language_util.intersect(pipeline_languages, languages)
+    else:
+        pipeline_languages = languages
+    return pipeline_languages
+
+
+def _list_languages_for_stt(
+    stt_language_tags: set[str], pipeline_languages: set[str] | None
+) -> set[str]:
+    languages = set()
+    for language_tag in stt_language_tags:
+        dialect = language_util.Dialect.parse(language_tag)
+        languages.add(dialect.language)
+    if pipeline_languages is not None:
+        pipeline_languages = language_util.intersect(pipeline_languages, languages)
+    else:
+        pipeline_languages = languages
+    return pipeline_languages
+
+
+def _list_languages_for_conv(conv_language_tags: set[str] | Literal["*"]) -> set[str]:
+    if conv_language_tags and conv_language_tags != MATCH_ALL:
+        languages = set()
+        for language_tag in conv_language_tags:
+            dialect = language_util.Dialect.parse(language_tag)
+            languages.add(dialect.language)
+        pipeline_languages = languages
+    return pipeline_languages
 
 
 @websocket_api.require_admin
