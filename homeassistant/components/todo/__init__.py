@@ -209,6 +209,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class TodoItem:
     """A To-do item in a To-do list."""
 
+    parent: str | None = None
+    """Identifier of the parent task."""
+
     summary: str | None = None
     """The summary that represents the item."""
 
