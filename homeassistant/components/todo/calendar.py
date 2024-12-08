@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 
 from ical.calendar import Calendar
 from ical.event import Event
-import TodoItem
+from todo import TodoItem
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
