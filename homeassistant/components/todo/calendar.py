@@ -7,7 +7,6 @@ from datetime import date, datetime, timedelta
 
 from ical.calendar import Calendar
 from ical.event import Event
-from todo import TodoItem
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
@@ -30,10 +29,15 @@ async def async_setup_entry(
     calendar = Calendar()
     calendar.prodid = PRODID
 
-    # I can't figure out how to get the data from the todolist into here, this below doesn't work
-    # todo_list_entity = hass.data[DATA_COMPONENT]
+    # keys here can also be "shopping_list", etc.
+    keys = list(hass.data["google_tasks"].keys())
+    asyncConfigEntryAuth = hass.data["google_tasks"][keys[0]]
+    list_task_lists = await asyncConfigEntryAuth.list_task_lists()
+    list_task = list_task_lists[0]
+    tasks = await asyncConfigEntryAuth.list_tasks(list_task["id"])
+    print("tasks: ", tasks)
 
-    todo_items: list[TodoItem] = []
+    todo_items: list[any] = []
     todo_events = [_todo_item_to_event(item) for item in todo_items]
 
     for event in todo_events:
