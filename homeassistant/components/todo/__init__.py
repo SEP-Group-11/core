@@ -14,7 +14,7 @@ import voluptuous as vol
 from homeassistant.components import frontend, websocket_api
 from homeassistant.components.websocket_api import ERR_NOT_FOUND, ERR_NOT_SUPPORTED
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ENTITY_ID
+from homeassistant.const import CONF_ENTITY_ID, Platform
 from homeassistant.core import (
     CALLBACK_TYPE,
     HomeAssistant,
@@ -52,6 +52,8 @@ ENTITY_ID_FORMAT = DOMAIN + ".{}"
 PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA
 PLATFORM_SCHEMA_BASE = cv.PLATFORM_SCHEMA_BASE
 SCAN_INTERVAL = datetime.timedelta(seconds=60)
+
+PLATFORMS: list[Platform] = [Platform.CALENDAR]
 
 
 @dataclasses.dataclass
