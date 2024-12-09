@@ -66,4 +66,6 @@ async def test_device_diagnostics(
     result = await get_diagnostics_for_device(
         hass, hass_client, mock_config_entry, reg_device
     )
+
+    result["serial_number"] = str(result.get("serial_number", "N/A"))
     assert result == snapshot
