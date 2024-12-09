@@ -371,6 +371,11 @@ async def websocket_handle_subscribe_todo_items(
 
     @callback
     def todo_item_listener(todo_items: list[JsonValueType] | None) -> None:
+        print(">>>>>> todo_item_listener")
+        print(hass.data["google_tasks"])
+        print(hass.data["calendar"])
+        calendar = hass.data["calendar"]
+        calendar.cool()
         """Push updated To-do list items to websocket."""
         connection.send_message(
             websocket_api.event_message(

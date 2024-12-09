@@ -14,8 +14,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_CALENDAR_NAME
-
 PRODID = "-//homeassistant.io//todo 1.0//EN"
 
 
@@ -29,22 +27,34 @@ async def async_setup_entry(
     calendar = Calendar()
     calendar.prodid = PRODID
 
+    print(">>>>> async_setup_entry")
+    print("DOMAIN: ", config_entry.domain)
+    print("CONFIG: ", config_entry)
+    print(hass.data[config_entry.domain])
+    print(hass.data[config_entry.domain][config_entry.entry_id])
+
     # keys here can also be "shopping_list", etc.
     keys = list(hass.data["google_tasks"].keys())
     asyncConfigEntryAuth = hass.data["google_tasks"][keys[0]]
     list_task_lists = await asyncConfigEntryAuth.list_task_lists()
     list_task = list_task_lists[0]
     tasks = await asyncConfigEntryAuth.list_tasks(list_task["id"])
-    print("tasks: ", tasks)
-
-    todo_items: list[any] = []
-    todo_events = [_todo_item_to_event(item) for item in todo_items]
+    filtered_tasks = []
+    for task in tasks:
+        if "due" in task:
+            filtered_tasks.append(task)
+    todo_events = [_todo_item_to_event(item) for item in filtered_tasks]
 
     for event in todo_events:
         calendar.events.append(event)
 
-    name = config_entry.data[CONF_CALENDAR_NAME]
-    entity = ReadonlyCalendarEntity(calendar, name, unique_id=config_entry.entry_id)
+    # name = config_entry.data[CONF_CALENDAR_NAME]
+    entity = ReadonlyCalendarEntity(
+        calendar, config_entry.domain, unique_id=config_entry.entry_id
+    )
+
+    hass.data[config_entry.domain]["calendar"] = entity;
+
     async_add_entities([entity], True)
 
 
@@ -65,6 +75,25 @@ class ReadonlyCalendarEntity(CalendarEntity):
         self._calendar_lock = asyncio.Lock()
         self._attr_name = name
         self._attr_unique_id = unique_id
+        self._event: CalendarEvent | None = None
+
+    @property
+    def event(self) -> CalendarEvent | None:
+        """Return the next upcoming event."""
+        return self._event
+
+    async def set_calendar(self, calendar: Calendar):
+        self._calendar = calendar
+        await self.async_update()
+
+    async def async_update(self) -> None:
+        """Update entity state with the next upcoming event."""
+        now = dt_util.now()
+        events = self._calendar.timeline_tz(now.tzinfo).active_after(now)
+        if event := next(events, None):
+            self._event = _get_calendar_event(event)
+        else:
+            self._event = None
 
     async def async_get_events(
         self,
@@ -72,6 +101,7 @@ class ReadonlyCalendarEntity(CalendarEntity):
         start_date: datetime,
         end_date: datetime,
     ) -> list[CalendarEvent]:
+        print(">>>> todo/calendar.py -> async_get_events()")
         """Return calendar events within a datetime range."""
         events = self._calendar.timeline_tz(start_date.tzinfo).overlapping(
             start_date,
@@ -109,16 +139,15 @@ def _get_calendar_event(event: Event) -> CalendarEvent:
     )
 
 
-def _todo_item_to_event(todo_item: TodoItem) -> Event:
+def _todo_item_to_event(todo_item: dict) -> Event:
     """Convert a todo-item into a calendar event."""
-
     # start == end time is a really short event
     return Event(
-        summary=todo_item.summary,
-        start=todo_item.due,
-        end=todo_item.due,
-        description=todo_item.description,
-        uid=todo_item.uid,
+        summary=todo_item["title"],
+        start=todo_item["due"],
+        end=todo_item["due"],
+        # description=todo_item["description"],
+        uid=todo_item["id"],
         # rrule=event.rrule.as_rrule_str() if event.rrule else None,
         # recurrence_id=event.recurrence_id,
         # location=event.location,
