@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 DOMAIN = "todo"
 DATA_COMPONENT: HassKey[EntityComponent[TodoListEntity]] = HassKey(DOMAIN)
-CONF_CALENDAR_NAME = "calendar_name"
 
 ATTR_DUE = "due"
 ATTR_DUE_DATE = "due_date"

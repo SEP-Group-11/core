@@ -14,7 +14,7 @@ import voluptuous as vol
 from homeassistant.components import frontend, websocket_api
 from homeassistant.components.websocket_api import ERR_NOT_FOUND, ERR_NOT_SUPPORTED
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ENTITY_ID, Platform
+from homeassistant.const import CONF_ENTITY_ID, EVENT_COMPONENT_LOADED
 from homeassistant.core import (
     CALLBACK_TYPE,
     HomeAssistant,
@@ -52,8 +52,6 @@ ENTITY_ID_FORMAT = DOMAIN + ".{}"
 PLATFORM_SCHEMA = cv.PLATFORM_SCHEMA
 PLATFORM_SCHEMA_BASE = cv.PLATFORM_SCHEMA_BASE
 SCAN_INTERVAL = datetime.timedelta(seconds=60)
-
-PLATFORMS: list[Platform] = [Platform.CALENDAR]
 
 
 @dataclasses.dataclass
@@ -132,6 +130,29 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register_command(hass, websocket_handle_subscribe_todo_items)
     websocket_api.async_register_command(hass, websocket_handle_todo_item_list)
     websocket_api.async_register_command(hass, websocket_handle_todo_item_move)
+
+    async def _handle_component_loaded(event):
+        from homeassistant.helpers import entity_registry as er
+
+        component = event.data.get("component")
+        entries = hass.config_entries.async_entries(component)
+        entity_reg = er.async_get(hass)
+        todo_component = hass.data["todo"]
+        entities = [
+            todo_component.get_entity(entity.entity_id)
+            for entry in entries
+            for entity in er.async_entries_for_config_entry(entity_reg, entry.entry_id)
+        ]
+        entities = [
+            entity
+            for entity in entities
+            if entity is not None and isinstance(entity, TodoListEntity)
+        ]
+        entities = [entity for entity in entities if isinstance(entity, TodoListEntity)]
+        for entity in entities:
+            entity.async_subscribe_updates(lambda x: print(x))
+
+    hass.bus.async_listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
 
     component.async_register_entity_service(
         TodoServices.REMOVE_LIST,
@@ -216,7 +237,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a config entry."""
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return await hass.data[DATA_COMPONENT].async_setup_entry(entry)
 
 
@@ -371,11 +391,6 @@ async def websocket_handle_subscribe_todo_items(
 
     @callback
     def todo_item_listener(todo_items: list[JsonValueType] | None) -> None:
-        print(">>>>>> todo_item_listener")
-        print(hass.data["google_tasks"])
-        print(hass.data["calendar"])
-        calendar = hass.data["calendar"]
-        calendar.cool()
         """Push updated To-do list items to websocket."""
         connection.send_message(
             websocket_api.event_message(
