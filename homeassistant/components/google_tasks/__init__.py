@@ -13,7 +13,7 @@ from homeassistant.helpers import config_entry_oauth2_flow
 from . import api
 from .const import DOMAIN
 
-PLATFORMS: list[Platform] = [Platform.TODO]
+PLATFORMS: list[Platform] = [Platform.CALENDAR, Platform.TODO]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

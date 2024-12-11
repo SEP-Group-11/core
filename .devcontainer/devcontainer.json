@@ -67,5 +67,8 @@
         ]
       }
     }
-  }
+  },
+  "mounts": [
+    "source=/Users/longfangsong/Projects/frontend,target=/workspaces/frontend,type=bind,consistency=cached"
+  ]
 }
