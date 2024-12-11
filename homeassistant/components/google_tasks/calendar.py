@@ -24,6 +24,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 from ical.store import EventStore, EventStoreError
 from homeassistant.const import CONF_ENTITY_ID, EVENT_COMPONENT_LOADED
+from homeassistant.helpers import entity_registry as er
 
 PRODID = "-//homeassistant.io//google_tasks 1.0//EN"
 
@@ -44,10 +45,7 @@ async def async_setup_entry(
     list_task_lists = await asyncConfigEntryAuth.list_task_lists()
     list_task = list_task_lists[0]
     tasks = await asyncConfigEntryAuth.list_tasks(list_task["id"])
-    filtered_tasks = []
-    for task in tasks:
-        if "due" in task:
-            filtered_tasks.append(task)
+    filtered_tasks = [task for task in tasks if "due" in task]
     todo_events = [_todo_item_to_event(item) for item in filtered_tasks]
     for event in todo_events:
         calendar.events.append(event)
@@ -58,11 +56,9 @@ async def async_setup_entry(
     async_add_entities([entity], True)
 
     async def _handle_component_loaded(event):
-        from homeassistant.helpers import entity_registry as er
-
         component = event.data.get("component")
         if component == "google_tasks":
-            print("second-phase setup")
+            # second-phase setup
             entity_reg = er.async_get(hass)
             entries = er.async_entries_for_config_entry(
                 entity_reg, config_entry.entry_id
@@ -85,20 +81,13 @@ async def async_setup_entry(
 
 
 def _handle_todo_events(hass, domain, item_list):
-    entity = hass.data[domain]["calendar"]
-    entity._calendar.events.clear()
+    entity: InMemoryCalendarEntity = hass.data[domain]["calendar"]
+    entity.clear_calendar()
     if item_list:
         for item in item_list:
             if item["due"] is not None:
                 event = _item_list_item_to_event(item)
-                entity._calendar.events.append(event)
-        # print(item_list)
-        # todo_events = [_todo_item_to_event(item) for item in item_list]
-        # for event in todo_events:
-        #     entity._calendar.events.append(event)
-    # entity.async_write_ha_state()
-    # for item in item_list:
-    #     print(item)
+                entity.append_calendar(event)
 
 
 class InMemoryCalendarEntity(CalendarEntity):
@@ -187,6 +176,12 @@ class InMemoryCalendarEntity(CalendarEntity):
     ) -> None:
         """Update an existing event on the calendar."""
         await self.async_update_ha_state(force_refresh=True)
+
+    def clear_calendar(self):
+        self._calendar.events.clear()
+
+    def append_calendar(self, event: Event):
+        self._calendar.events.append(event)
 
 
 def _get_calendar_event(event: Event) -> CalendarEvent:

@@ -131,29 +131,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register_command(hass, websocket_handle_todo_item_list)
     websocket_api.async_register_command(hass, websocket_handle_todo_item_move)
 
-    async def _handle_component_loaded(event):
-        from homeassistant.helpers import entity_registry as er
-
-        component = event.data.get("component")
-        entries = hass.config_entries.async_entries(component)
-        entity_reg = er.async_get(hass)
-        todo_component = hass.data["todo"]
-        entities = [
-            todo_component.get_entity(entity.entity_id)
-            for entry in entries
-            for entity in er.async_entries_for_config_entry(entity_reg, entry.entry_id)
-        ]
-        entities = [
-            entity
-            for entity in entities
-            if entity is not None and isinstance(entity, TodoListEntity)
-        ]
-        entities = [entity for entity in entities if isinstance(entity, TodoListEntity)]
-        for entity in entities:
-            entity.async_subscribe_updates(lambda x: print(x))
-
-    hass.bus.async_listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
-
     component.async_register_entity_service(
         TodoServices.REMOVE_LIST,
         cv.make_entity_service_schema(
