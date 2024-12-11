@@ -27,8 +27,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-PRODID = "-//homeassistant.io//google_tasks 1.0//EN"
-
 
 # The calendar is populated on creation by converting each todo-item into a calendar event
 async def async_setup_entry(
@@ -43,7 +41,7 @@ async def async_setup_entry(
     list_task_lists = await asyncConfigEntryAuth.list_task_lists()
     for list_task in list_task_lists:
         calendar = Calendar()
-        calendar.prodid = PRODID
+        calendar.prodid = f"-//homeassistant.io//google_tasks_{list_task['id']} 1.0//EN"
         tasks = await asyncConfigEntryAuth.list_tasks(list_task["id"])
         filtered_tasks = [task for task in tasks if "due" in task]
         todo_events = [_todo_item_to_event(item) for item in filtered_tasks]
@@ -67,17 +65,17 @@ async def async_setup_entry(
                 entities = [
                     todo_component.get_entity(entry.entity_id) for entry in entries
                 ]
-                entities = [
+                entity = next(
                     entity
                     for entity in entities
-                    if entity is not None and isinstance(entity, TodoListEntity)
-                ]
-                for entity in entities:
-                    entity.async_subscribe_updates(
-                        lambda item_list: _handle_todo_events(
-                            calendar_entity, item_list
-                        )
-                    )
+                    if entity is not None
+                    and isinstance(entity, TodoListEntity)
+                    and entity.entity_id.split(".")[1]
+                    == calendar_entity.entity_id.split(".")[1]
+                )
+                entity.async_subscribe_updates(
+                    lambda item_list: _handle_todo_events(calendar_entity, item_list)
+                )
 
         hass.bus.async_listen(
             EVENT_COMPONENT_LOADED,
