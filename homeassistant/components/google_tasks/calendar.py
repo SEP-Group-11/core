@@ -5,26 +5,27 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, timedelta
 from typing import Any
-from ical.event import Event
+
 from ical.calendar import Calendar
-from ical.types import Range, Recur
-from homeassistant.exceptions import HomeAssistantError
+from ical.event import Event
+from ical.store import EventStore, EventStoreError
+from ical.types import Range
 import voluptuous as vol
-from homeassistant.components.calendar import CalendarEntity, CalendarEvent
-from homeassistant.components.calendar.const import (
+
+from homeassistant.components.calendar import (
     EVENT_END,
-    EVENT_RRULE,
     EVENT_START,
-    CalendarEntityFeature,
+    CalendarEntity,
+    CalendarEvent,
 )
 from homeassistant.components.todo import TodoListEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_COMPONENT_LOADED
 from homeassistant.core import _LOGGER, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
-from ical.store import EventStore, EventStoreError
-from homeassistant.const import CONF_ENTITY_ID, EVENT_COMPONENT_LOADED
-from homeassistant.helpers import entity_registry as er
 
 PRODID = "-//homeassistant.io//google_tasks 1.0//EN"
 
@@ -54,7 +55,7 @@ async def async_setup_entry(
         )
         async_add_entities([calendar_entity], True)
 
-        async def _handle_component_loaded(event):
+        async def _handle_component_loaded(event, calendar_entity=calendar_entity):
             component = event.data.get("component")
             if component == "google_tasks":
                 # second-phase setup
@@ -78,7 +79,10 @@ async def async_setup_entry(
                         )
                     )
 
-        hass.bus.async_listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
+        hass.bus.async_listen(
+            EVENT_COMPONENT_LOADED,
+            _handle_component_loaded,
+        )
 
 
 def _handle_todo_events(entity: InMemoryCalendarEntity, item_list):
@@ -94,7 +98,7 @@ class InMemoryCalendarEntity(CalendarEntity):
     """A calendar entity backed by memory."""
 
     _attr_has_entity_name = True
-    _attr_supported_features = ()
+    _attr_supported_features = None
 
     def __init__(
         self,
@@ -161,7 +165,6 @@ class InMemoryCalendarEntity(CalendarEntity):
                 )
             except EventStoreError as err:
                 raise HomeAssistantError(f"Error while deleting event: {err}") from err
-            await self._async_store()
         await self.async_update_ha_state(force_refresh=True)
 
     async def async_update_event(
@@ -175,9 +178,11 @@ class InMemoryCalendarEntity(CalendarEntity):
         await self.async_update_ha_state(force_refresh=True)
 
     def clear_calendar(self):
+        """Clear the calendar."""
         self._calendar.events.clear()
 
     def append_calendar(self, event: Event):
+        """Append an event to the calendar."""
         self._calendar.events.append(event)
 
 

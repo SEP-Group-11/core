@@ -14,7 +14,7 @@ import voluptuous as vol
 from homeassistant.components import frontend, websocket_api
 from homeassistant.components.websocket_api import ERR_NOT_FOUND, ERR_NOT_SUPPORTED
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ENTITY_ID, EVENT_COMPONENT_LOADED
+from homeassistant.const import CONF_ENTITY_ID
 from homeassistant.core import (
     CALLBACK_TYPE,
     HomeAssistant,
