@@ -36,52 +36,52 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the todo calendar platform."""
-    calendar = Calendar()
-    calendar.prodid = PRODID
-    from homeassistant.helpers import entity_registry as er
 
     keys = list(hass.data["google_tasks"].keys())
     asyncConfigEntryAuth = hass.data["google_tasks"][keys[0]]
     list_task_lists = await asyncConfigEntryAuth.list_task_lists()
-    list_task = list_task_lists[0]
-    tasks = await asyncConfigEntryAuth.list_tasks(list_task["id"])
-    filtered_tasks = [task for task in tasks if "due" in task]
-    todo_events = [_todo_item_to_event(item) for item in filtered_tasks]
-    for event in todo_events:
-        calendar.events.append(event)
-    entity = InMemoryCalendarEntity(
-        calendar, config_entry.domain, unique_id=config_entry.entry_id
-    )
-    hass.data[config_entry.domain]["calendar"] = entity
-    async_add_entities([entity], True)
+    for list_task in list_task_lists:
+        calendar = Calendar()
+        calendar.prodid = PRODID
+        tasks = await asyncConfigEntryAuth.list_tasks(list_task["id"])
+        filtered_tasks = [task for task in tasks if "due" in task]
+        todo_events = [_todo_item_to_event(item) for item in filtered_tasks]
+        for event in todo_events:
+            calendar.events.append(event)
 
-    async def _handle_component_loaded(event):
-        component = event.data.get("component")
-        if component == "google_tasks":
-            # second-phase setup
-            entity_reg = er.async_get(hass)
-            entries = er.async_entries_for_config_entry(
-                entity_reg, config_entry.entry_id
-            )
-            todo_component = hass.data["todo"]
-            entities = [todo_component.get_entity(entry.entity_id) for entry in entries]
-            entities = [
-                entity
-                for entity in entities
-                if entity is not None and isinstance(entity, TodoListEntity)
-            ]
-            for entity in entities:
-                entity.async_subscribe_updates(
-                    lambda item_list: _handle_todo_events(
-                        hass, config_entry.domain, item_list
-                    )
+        calendar_entity = InMemoryCalendarEntity(
+            calendar, list_task["title"], config_entry.entry_id, list_task["id"]
+        )
+        async_add_entities([calendar_entity], True)
+
+        async def _handle_component_loaded(event):
+            component = event.data.get("component")
+            if component == "google_tasks":
+                # second-phase setup
+                entity_reg = er.async_get(hass)
+                entries = er.async_entries_for_config_entry(
+                    entity_reg, config_entry.entry_id
                 )
+                todo_component = hass.data["todo"]
+                entities = [
+                    todo_component.get_entity(entry.entity_id) for entry in entries
+                ]
+                entities = [
+                    entity
+                    for entity in entities
+                    if entity is not None and isinstance(entity, TodoListEntity)
+                ]
+                for entity in entities:
+                    entity.async_subscribe_updates(
+                        lambda item_list: _handle_todo_events(
+                            calendar_entity, item_list
+                        )
+                    )
 
-    hass.bus.async_listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
+        hass.bus.async_listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
 
 
-def _handle_todo_events(hass, domain, item_list):
-    entity: InMemoryCalendarEntity = hass.data[domain]["calendar"]
+def _handle_todo_events(entity: InMemoryCalendarEntity, item_list):
     entity.clear_calendar()
     if item_list:
         for item in item_list:
@@ -94,24 +94,21 @@ class InMemoryCalendarEntity(CalendarEntity):
     """A calendar entity backed by memory."""
 
     _attr_has_entity_name = True
-    _attr_supported_features = (
-        CalendarEntityFeature.CREATE_EVENT
-        | CalendarEntityFeature.DELETE_EVENT
-        | CalendarEntityFeature.UPDATE_EVENT
-    )
+    _attr_supported_features = ()
 
     def __init__(
         self,
         calendar: Calendar,
         name: str,
-        unique_id: str,
+        config_entry_id: str,
+        task_list_id: str,
     ) -> None:
         """Initialize LocalCalendarEntity."""
         self._calendar = calendar
         self._calendar_lock = asyncio.Lock()
         self._event: CalendarEvent | None = None
         self._attr_name = name
-        self._attr_unique_id = unique_id
+        self._attr_unique_id = f"{config_entry_id}-{task_list_id}"
 
     @property
     def event(self) -> CalendarEvent | None:
