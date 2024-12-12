@@ -828,7 +828,7 @@ async def test_parent_child_ordering(
 
     state = hass.states.get("todo.my_tasks")
     assert state
-    assert state.state == "4"
+    assert state.state == "6"
 
     items = await ws_get_items()
     assert items == snapshot

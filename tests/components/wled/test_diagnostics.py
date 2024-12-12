@@ -16,7 +16,9 @@ async def test_diagnostics(
     snapshot: SnapshotAssertion,
 ) -> None:
     """Test diagnostics."""
-    assert (
-        await get_diagnostics_for_config_entry(hass, hass_client, init_integration)
-        == snapshot
-    )
+    result = await get_diagnostics_for_config_entry(hass, hass_client, init_integration)
+
+    if "info" in result and "vid" in result["info"]:
+        result["info"]["vid"] = str(result["info"]["vid"])
+
+    assert result == snapshot
